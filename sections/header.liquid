@@ -1,79 +1,60 @@
+
+
+
+<div class="localization-switcher">
+  {%- form 'localization', class: 'locale_dropup', id: 'localizationForm' -%}
+      <button type="button" class="locale_button" aria-expanded="false" aria-controls="localeList"  >
+        {{ form.current_locale.endonym_name }}
+      </button>
+
+      <ul id="localeList" class="locale_content">
+        {%- for locale in form.available_locales -%}
+          <li>
+            <a id="localeLink" href="#" lang="{{ locale.iso_code }}"
+
+                {% if locale.iso_code == form.current_locale.iso_code %} 
+                  aria-current="true" 
+                {% endif %}
+
+            > {{ locale.endonym_name }}
+
+            </a>
+          </li>
+        {%- endfor -%}
+      </ul>
+      <input 
+        type="hidden" 
+        name="locale_code" 
+        id="LocaleSelector" 
+        value="{{ form.current_locale.iso_code }}"
+      />
+  {%- endform -%}
+  <script>
+
+    document.querySelectorAll("#localeLink").forEach(item => {
+      item.addEventListener("click", event => {
+        document.getElementById("LocaleSelector").value = item.getAttribute("lang");
+        document.getElementById("localizationForm").submit();
+      })
+    })
+
+  </script>
+</div>
+
 <div class="header-wrapper" data-section-id="{{ section.id }}" data-section-type="header">
-  {%- if section.settings.announcement_bar_enabled -%}
-    {%- assign announcement_bar_color_text_rgba_stripped = section.settings.announcement_bar_color_text | color_to_rgb | remove: 'rgb(' | remove: ')' -%}
-    {%- style -%}
-      .announcement-bar {
-        background-color: {{ section.settings.announcement_bar_color_background }};
-        border-bottom: 1px solid {{ section.settings.announcement_bar_color_text }};
-      }
-
-      .announcement-bar__link,
-      .announcement-bar__message {
-        color: {{ section.settings.announcement_bar_color_text }};
-      }
-
-      .announcement-bar {
-        --focus-color: rgba({{ announcement_bar_color_text_rgba_stripped }}, 0.8);
-        --focus-offset-color: {{ section.settings.announcement_bar_color_background }};
-      }
-
-      {%- if section.settings.enable_secondary_background -%}
-        .search-drawer {
-          background-color: var(--color-secondary-background);
-        }
-
-        .search__form-button--drawer, .search__form-input-label--drawer, .search__form-input--drawer.form__input {
-          color: var(--color-secondary-background-text);
-        }
-
-        .search__form-input--drawer.form__input{
-          border-color: var(--color-secondary-background-text);
-        }
-
-        .search__form-button--drawer .icon-close {
-          stroke: var(--color-secondary-background-text);
-        }
-
-        .search-drawer {
-          --focus-color: rgba(var(--color-secondary-background-text-rgba-stripped), 0.8);
-          --focus-offset-color: var(--color-secondary-background);
-        }
-      {%- endif -%}
-    {%- endstyle -%}
-
-    <div class="announcement-bar" role="region" aria-label="{{ 'sections.header.announcement' | t }}" data-announcement-bar>
-      {%- if section.settings.announcement_bar_text != blank -%}
-        {%- if section.settings.announcement_bar_url != blank -%}
-          <a href="{{ section.settings.announcement_bar_url }}" class="announcement-bar__link focus-inset">
-        {%- endif -%}
-
-        <p class="announcement-bar__message">
-          {{ section.settings.announcement_bar_text | escape }}
-        </p>
-
-        {%- if section.settings.announcement_bar_url != blank -%}
-            {% render 'icon-arrow-right-large' %}
-          </a>
-        {%- endif -%}
-      {%- endif -%}
-    </div>
-  {%- endif -%}
-
-  {%- liquid
-    assign render_menu = false
-
-    if section.settings.main_menu != blank
-      assign menu = linklists[section.settings.main_menu]
-
-      if menu.links.size != 0
-        assign render_menu = true
-      endif
-    endif
-  -%}
-
   <header class="header{% if section.settings.enable_secondary_background %} header--secondary-background{% endif %}" role="banner" data-header>
     <div class="header__content-wrapper">
-      {%- if request.page_type == 'index' -%}
+     
+
+      {%- liquid
+        if render_menu
+          render 'menu-navigation', menu: menu, is_mobile: false
+        endif
+      -%}
+
+      <div class="header__icons">
+
+        {%- if request.page_type == 'index' -%}
         <h1 class="header__heading">
       {%- else -%}
         <div class="header__heading">
@@ -100,16 +81,10 @@
       {%- if request.page_type == 'index' %}
         </h1>
       {%- else -%}
-        </div>
-      {%- endif -%}
+      </div>
+    {%- endif -%}
 
-      {%- liquid
-        if render_menu
-          render 'menu-navigation', menu: menu, is_mobile: false
-        endif
-      -%}
 
-      <div class="header__icons">
         {%- if section.settings.show_search -%}
           <button type="button"
             class="header__icon header__icon--button header__icon--search-button focus-inset"
@@ -166,7 +141,7 @@
 
         {%- if settings.show_cart_drawer -%}
           <button class="header__icon header__icon--button header__icon--cart focus-inset"
-            data-header-icon
+           
             aria-controls="CartDrawer"
             aria-haspopup="dialog"
             aria-expanded="false"
@@ -209,8 +184,7 @@
             </span>
           </button>
         {%- endif -%}
-      </div>
-
+    </div>
       {%- if render_menu -%}
         <div class="stage header__mobile-navigation" data-popup-stage="menu-navigation" data-mobile-navigation-container>
           <div class="stage__overlay" data-popup-close="menu-navigation"></div>
@@ -236,8 +210,11 @@
           </div>
         </div>
       {%- endif -%}
+ 
     </div>
+
   </header>
+
 </div>
 
 <script type="application/ld+json">
@@ -279,6 +256,8 @@
     }
   </script>
 {% endif %}
+
+
 
 {% schema %}
 {

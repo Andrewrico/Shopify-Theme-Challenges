@@ -60,6 +60,10 @@
     {%- assign footer_block_width = 'footer__content--one-third' -%}
   {%- when 4 -%}
     {%- assign footer_block_width = 'footer__content--one-quarter' -%}
+  {%- when 5 -%}
+    {%- assign footer_block_width = 'footer__content--one-fifth' -%}
+  {%- when 6 -%}
+    {%- assign footer_block_width = 'footer__content--one-sixth' -%}
 {%- endcase -%}
 
 {%- assign color_footer_body_text_rgba_stripped = section.settings.color_footer_body_text | color_to_rgb | remove: 'rgb(' | remove: ')' -%}

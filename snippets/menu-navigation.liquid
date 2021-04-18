@@ -14,6 +14,7 @@
   data-menu-navigation-type="{% if is_mobile %}mobile{% else %}desktop{% endif %}"
   {% if is_mobile %} data-popup-focus="menu-navigation" tabindex="-1"{% endif %}
 >
+
   <ul class="menu-navigation" role="list">
     {%- for link in menu.links -%}
       <li class="menu-navigation__list-item"
@@ -109,4 +110,5 @@
       </li>
     {%- endif -%}
   </ul>
+
 </nav>
