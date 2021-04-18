@@ -4,2249 +4,556 @@
 * Change <script src="{{ 'theme.min.js' | asset_url }}"> to:
 * <script src="{{ 'theme.js' | asset_url }}">
 */
-(function ($,omit,find,throttle,a11y,remove,filter,fill,debounce,morphdom,defaultTo,findIndex,isArray,Hammer) {
-$ = 'default' in $ ? $['default'] : $;
-omit = 'default' in omit ? omit['default'] : omit;
-find = 'default' in find ? find['default'] : find;
-throttle = 'default' in throttle ? throttle['default'] : throttle;
-remove = 'default' in remove ? remove['default'] : remove;
-filter = 'default' in filter ? filter['default'] : filter;
-fill = 'default' in fill ? fill['default'] : fill;
-debounce = 'default' in debounce ? debounce['default'] : debounce;
-morphdom = 'default' in morphdom ? morphdom['default'] : morphdom;
-defaultTo = 'default' in defaultTo ? defaultTo['default'] : defaultTo;
-findIndex = 'default' in findIndex ? findIndex['default'] : findIndex;
-isArray = 'default' in isArray ? isArray['default'] : isArray;
-Hammer = 'default' in Hammer ? Hammer['default'] : Hammer;
+(function (sections,_shopify_themeA11y) {
+sections = 'default' in sections ? sections['default'] : sections;
 
-function Templates() {
-  this.registered = {};
-  this.instances = [];
-  this.extensions = {
-    '*': []
+const keyCodes = {
+  TAB: 'tab',
+  ENTER: 'enter',
+  ESC: 'escape',
+  SPACE: ' ',
+  END: 'end',
+  HOME: 'home',
+  LEFT: 'arrowleft',
+  UP: 'arrowup',
+  RIGHT: 'arrowright',
+  DOWN: 'arrowdown',
+};
+
+function debounce(fn, wait) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    // eslint-disable-next-line babel/no-invalid-this
+    t = setTimeout(() => fn.apply(this, args), wait);
   };
 }
 
-Templates.prototype = {
-  register: function(name, classname, properties) {
-    function Template(container, extensions) {
-      this.name = name.toLowerCase();
-      this.container = container;
-      this.$container = $(container);
-      this.extensions = extensions;
-      Master.call(this);
-    }
+/* eslint-disable babel/no-invalid-this */
+function promiseStylesheet(stylesheet) {
+  const stylesheetUrl = stylesheet || theme.stylesheet;
 
-    Template.classname = classname;
-    Template.constructor = Template;
-    Template.prototype = Object.create(Master.prototype);
-    $.extend(Template.prototype, properties);
+  if (typeof this.stylesheetPromise === 'undefined') {
+    this.stylesheetPromise = new Promise((resolve) => {
+      const link = document.querySelector(`link[href="${stylesheetUrl}"]`);
 
-    this.registered[name] = Template;
-  },
+      if (link.loaded) {
+        resolve();
+      }
 
-  extend: function(names, extension) {
-    if (names === '*') {
-      names = Object.keys(this.registered);
-      names.push('*');
-    } else if (typeof names === 'string') {
-      names = [names];
-    }
-
-    names.forEach(
-      function(name) {
-        this.extensions[name] = this.extensions[name] || [];
-        this.extensions[name].push(extension);
-
-        if (typeof this.registered[name] === 'undefined' || name === '*')
-          return;
-
-        this.instances.forEach(function(instance) {
-          if (instance.name !== name) return;
-
-          instance.extend(extension);
-        });
-      }.bind(this)
-    );
-  },
-
-  load: function(names) {
-    if (names === '*') {
-      names = Object.keys(this.registered);
-    } else if (typeof names === 'string') {
-      names = [names];
-    }
-
-    names.forEach(this._loadTemplate.bind(this));
-  },
-
-  _loadTemplate: function(name) {
-    var Template = this.registered[name];
-    var instance = find(this.instances, { name: name });
-    var container;
-    var extensions;
-
-    // If the template name is not registered or already has an instance loaded,
-    // then return
-    if (typeof Template === 'undefined' || instance) return;
-
-    // Get the container for the template
-    if (Template.classname === '*') {
-      container = document.body;
-    } else {
-      container = document.querySelector('body.' + Template.classname);
-    }
-
-    // If we don't have the specified container on the page then return
-    if (!container) return;
-
-    // Get all extensions for the new template instance
-    extensions = this.extensions['*'].concat(this.extensions[name] || []);
-    instance = new Template(container, extensions);
-
-    // Call the onLoad function of the template if it exists
-    if ($.isFunction(instance.onLoad)) {
-      instance.onLoad(container);
-    }
-
-    // Push the template instance to storage
-    this.instances.push(instance);
+      window.onloadCSS(link, function () {
+        // Global onloadCSS function injected by load-css.liquid
+        resolve();
+      });
+    });
   }
-};
 
-function Master() {
-  this.extensions.forEach(
-    function(extension) {
-      this.extend(extension);
-    }.bind(this)
-  );
+  return this.stylesheetPromise;
 }
-
-Master.prototype = {
-  extend: function(extension) {
-    var init = extension.init;
-    this.extensions.push(extension);
-
-    if ($.isFunction(init)) {
-      extension = omit(extension, 'init');
-    }
-
-    $.extend(this, extension);
-    init.apply(this);
-  }
-};
-
-var templates = new Templates();
-
-var classes$1 = {
-  disableScroll: 'disable-scroll',
-  isTouch: 'is-touch'
-};
-
-var utils = {
-  pointerEventToXY: function(event) {
-    var position;
-
-    if (event.originalEvent.touches) {
-      position =
-        event.originalEvent.touches[0] || event.originalEvent.changedTouches[0];
-    } else {
-      position = event;
-    }
-    return {
-      x: position.pageX,
-      y: position.pageY
-    };
-  },
-
-  promiseRepeatSeries: function(promise, count) {
-    count--;
-
-    return promise().then(
-      function() {
-        // eslint-disable-line consistent-return
-        if (count) {
-          return this.promiseRepeatSeries(promise, count);
-        }
-      }.bind(this)
-    );
-  },
-
-  mapPromiseSeries: function(iterable, cb, delay) {
-    var series = $.Deferred().resolve();
-
-    $.each(iterable, function(index, item) {
-      series = series.then(function() {
-        if (typeof delay === 'number') {
-          return delayedReturn(index, item);
-        } else {
-          return cb(index, item);
-        }
-      });
-    });
-
-    function delayedReturn(index, item) {
-      return $.Deferred(function(defer) {
-        setTimeout(function() {
-          defer.resolve(cb(index, item)); // eslint-disable-line callback-return
-        }, delay);
-      });
-    }
-
-    return series;
-  },
-
-  promiseAnimationEnd: function($el) {
-    var events = 'animationend webkitAnimationEnd oAnimationEnd';
-    var properties = [
-      'animation-duration',
-      '-moz-animation-duration',
-      '-webkit-animation-duration',
-      '-o-animation-duration'
-    ];
-    var duration = 0;
-    var promise = $.Deferred().resolve();
-
-    // check the various CSS properties to see if a duration has been set
-    $.each(properties, function(index, value) {
-      duration || (duration = parseFloat($el.css(value))); // eslint-disable-line no-unused-expressions
-    });
-
-    if (duration > 0) {
-      promise = $.Deferred(function(defer) {
-        $el.on(events, function(evt) {
-          if (evt.target !== $el[0]) return;
-          $el.off(events);
-          defer.resolve();
-        });
-      });
-    }
-
-    return promise;
-  },
-
-  promiseTransitionEnd: function($el) {
-    var events =
-      'webkitTransitionEnd otransitionend oTransitionEnd msTransitionEnd transitionend';
-    var properties = [
-      'transition-duration',
-      '-moz-transition-duration',
-      '-webkit-transition-duration',
-      '-o-transition-duration'
-    ];
-    var duration = 0;
-    var promise = $.Deferred().resolve();
-
-    // check the various CSS properties to see if a duration has been set
-    $.each(properties, function(index, value) {
-      duration || (duration = parseFloat($el.css(value))); // eslint-disable-line no-unused-expressions
-    });
-
-    if (duration > 0) {
-      promise = $.Deferred(function(defer) {
-        $el.on(events, function(evt) {
-          if (evt.target !== $el[0]) return;
-          $el.off(events);
-          defer.resolve();
-        });
-      });
-    }
-
-    return promise;
-  },
-
-  isLocalStorageSupported: function() {
-    var mod = 'localStorageTest';
-    try {
-      localStorage.setItem(mod, mod);
-      localStorage.removeItem(mod);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  },
-
-  isSessionStorageSupported: function() {
-    var mod = 'sessionStorageTest';
-    try {
-      sessionStorage.setItem(mod, mod);
-      sessionStorage.removeItem(mod);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  },
-
-  /**
-   * Set all tabbable elements tabindex attribute to '-1' so that they are not
-   * tabbable. Great for if you want to hide something with opacity: 0 or
-   * visibility: hidden, but don't want interactivity
-   *
-   * @param {any} container - Container to look for children elements to disable
-   */
-  disableTabbingOfChildren: function(containers) {
-    $(containers).each(function(index, container) {
-      $(
-        'a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), iframe, object, embed, *[tabindex], *[contenteditable]',
-        container
-      ).attr('tabindex', '-1');
-    });
-  },
-
-  /**
-   * Remove all tabbable elements' tabindex attribute so that they assume their
-   * normal tabbing behaviour.
-   *
-   * @param {any} container - Container to look for children elements to reset
-   */
-  enableTabbingOfChildren: function(containers) {
-    $(containers).each(function(index, container) {
-      $(
-        'a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), iframe, object, embed, *[tabindex]:not(.plyr):not([data-product-media-wrapper]), *[contenteditable]',
-        container
-      ).removeAttr('tabindex');
-    });
-  },
-
-  isiOSSafari: function() {
-    var userAgent = window.navigator.userAgent;
-    var iOS =
-      Boolean(userAgent.match(/iPad/i)) || Boolean(userAgent.match(/iPhone/i));
-    var webkit = Boolean(userAgent.match(/WebKit/i));
-
-    return iOS && webkit && !userAgent.match(/CriOS/i);
-  },
-
-  disableScrollBody: function() {
-    // If the body isn't tall enough to scroll then we have nothing to disable
-    if (document.body.scrollHeight - window.innerHeight === 0) return;
-
-    $('html').addClass(classes$1.disableScroll);
-  },
-
-  enableScrollBody: function() {
-    $('html').removeClass(classes$1.disableScroll);
-  },
-
-  updateUrlParameter: function(url, key, value) {
-    var re = new RegExp('([?&])' + key + '=.*?(&|$)', 'i');
-    var separator = url.indexOf('?') === -1 ? '?' : '&';
-
-    if (url.match(re)) {
-      return url.replace(re, '$1' + key + '=' + value + '$2');
-    } else {
-      return url + separator + key + '=' + value;
-    }
-  },
-
-  cookiesEnabled: function() {
-    var cookieEnabled = navigator.cookieEnabled;
-
-    if (!cookieEnabled) {
-      document.cookie = 'testcookie';
-      cookieEnabled = document.cookie.indexOf('testcookie') !== -1;
-    }
-    return cookieEnabled;
-  },
-
-  onFirst: function(name, fn) {
-    // bind as you normally would
-    // don't want to miss out on any jQuery magic
-    this.on(name, fn);
-
-    this.each(function() {
-      var handlers = $._data(this, 'events')[name.split('.')[0]];
-      // take out the handler we just inserted from the end
-      var handler = handlers.pop();
-      // move it at the beginning
-      handlers.splice(0, 0, handler);
-    });
-  },
-
-  // Returns a promise that is only resolved when the stylesheet has been
-  // downloaded. This function defaults to load the main stylesheet, but
-  // can be used to load a different stylesheet by passing in its url
-  promiseStylesheet: function(stylesheet) {
-    var stylesheetUrl = stylesheet || theme.stylesheet;
-
-    if (typeof this.stylesheetPromise === 'undefined') {
-      this.stylesheetPromise = $.Deferred(function(defer) {
-        var link = document.querySelector('link[href="' + stylesheetUrl + '"]');
-
-        if (link.loaded) {
-          defer.resolve();
-        }
-
-        /* eslint-disable no-undef */
-        onloadCSS(link, function() {
-          // Global onloadCSS function injected by load-css.liquid
-          defer.resolve();
-        });
-      });
-    }
-
-    return this.stylesheetPromise;
-  },
-
-  isMobile: function() {
-    // Create a scoped variable that stores the current status
-    var status = false;
-
-    // Replace utils.isMobile function with a function that returns the status.
-    // This makes sure the code below is on executed once, and then from there
-    // on the only thing that isMobile does is return var status.
-    this.isMobile = function() {
-      return status;
-    };
-
-    function checkIfMobile() {
-      status = $(window).outerWidth() < theme.mediaQuerySmall;
-      return status;
-    }
-
-    // Make sure that this resize handler is the first handler in the event loop
-    $.fn.onFirst = this.onFirst;
-
-    // This event handler is only assigned once.
-    $(window).onFirst('resize', checkIfMobile);
-
-    // Set the initial value of status and return that value. After this,
-    // isMobile() will return `var status`
-    return checkIfMobile();
-  },
-
-  isTablet: function() {
-    // Create a scoped variable that stores the current status
-    var status = false;
-
-    // Replace utils.isTablet function with a function that returns the status.
-    // This makes sure the code below is on executed once, and then from there
-    // on the only thing that isTablet does is return var status.
-    this.isTablet = function() {
-      return status;
-    };
-
-    function checkIfTablet() {
-      var width = $(window).outerWidth();
-      status = width > theme.mediaQuerySmall && width < theme.mediaQueryMedium;
-      return status;
-    }
-
-    // Make sure that this resize handler is the first handler in the event loop
-    $.fn.onFirst = this.onFirst;
-
-    // This event handler is only assigned once.
-    $(window).onFirst('resize', checkIfTablet);
-
-    // Set the initial value of status and return that value. After this,
-    // isTablet() will return `var status`
-    return checkIfTablet();
-  },
-
-  isInOrAboveViewport: function(element) {
-    var rect = element.getBoundingClientRect();
-    var offset = 50;
-
-    return (
-      // The top is in view: the top is more than 0 and less than the window height (the top of the element is in view)
-      (rect.top + offset >= 0 && rect.top + offset <= window.innerHeight) ||
-      // The bottom is in view: bottom position is greater than 0 and greater than the window height
-      (rect.bottom + offset >= 0 &&
-        rect.bottom + offset <= window.innerHeight) ||
-      // The top is above the viewport and the bottom is below the viewport
-      (rect.top + offset < 0 && rect.bottom + offset > window.innerHeight) ||
-      // The bottom is above the viewport
-      rect.bottom < 0
-    );
-  },
-
-  isTouch: function() {
-    // Create a scoped variable that stores the current status
-    var status = false;
-
-    this.isTouch = function() {
-      return status;
-    };
-
-    // This event handler is only assigned once.
-    $(document).one('touchstart', function() {
-      status = true;
-      $('html').addClass(classes$1.isTouch);
-    });
-
-    // Set the initial value of status and return that value.
-    return status;
-  },
-
-  keyboardKeys: {
-    TAB: 9,
-    ENTER: 13,
-    SPACE: 32,
-    LEFTARROW: 37,
-    RIGHTARROW: 39
-  }
-};
-
-var selectors = {
-  elementsToAnimate: '[data-animate]'
-};
-
-var classes = {
-  animated: 'has-animated',
-  animationsDisabled: 'animations--disabled'
-};
-
-templates.register('Page animations', '*', {
-  onLoad: function() {
-    this.animationNamespace = '.animations';
-    this.$elementsToAnimate = $(selectors.elementsToAnimate, this.$container);
-
-    if (this.$elementsToAnimate.length === 0) return;
-
-    // This extension is used for templates and sections. Templates don't have
-    // event handling like sections so we need to use regular jQuery events
-    var scrollEvent = 'scroll' + this.animationNamespace;
-
-    if (Shopify.designMode) {
-      scrollEvent += ' touchmove' + this.animationNamespace;
-    }
-    $(window).on(
-      scrollEvent,
-      throttle(this._animateElementsInViewport.bind(this), 200)
-    );
-    $(window).on(
-      'resize' + this.animationNamespace,
-      throttle(this._animateElementsInViewport.bind(this), 200)
-    );
-
-    if (Shopify && Shopify.designMode) {
-      $(document).on(
-        'shopify:section:load shopify:section:select',
-        this._onSectionSelect.bind(this)
-      );
-      $(document).on(
-        'shopify:section:unload shopify:section:deselect',
-        this._onSectionDeselect.bind(this)
-      );
-    }
-
-    // Put this on a loop to check if elements on page load need to be animated
-    utils.promiseStylesheet().then(this._animateElementsInViewport.bind(this));
-  },
-
-  _animateElementsInViewport: function() {
-    this.$elementsToAnimate = this.$elementsToAnimate.map(function(
-      index,
-      element
-    ) {
-      // If the element is not going to be animated, return it to the list of
-      // elements to animate
-      if (!utils.isInOrAboveViewport(element)) {
-        return element;
-      }
-
-      // Debounce any style changes to the next frame.
-      requestAnimationFrame(function() {
-        $(element).addClass(classes.animated);
-
-        // This extension is also used for template, which don't have trigger and
-        // events functionality
-        $(element).trigger('animate_element', [element]);
-      });
-
-      // Since this element was animated, we return null so its NOT added back
-      // to the list of elements to animate
-      return null;
-    });
-
-    if (this.$elementsToAnimate.length === 0) {
-      $(window).off(this.animationNamespace);
-    }
-  },
-
-  _onSectionSelect: function() {
-    $(document.body).addClass(classes.animationsDisabled);
-  },
-
-  _onSectionDeselect: function(evt) {
-    $(document.body).removeClass(classes.animationsDisabled);
-
-    $(evt.target)
-      .find(selectors.elementsToAnimate)
-      .addClass(classes.animated);
-  }
-});
-
-var selectors$2 = {
-  socialSharing: '.social-sharing',
-  socialSharingToggle: '.social-sharing__toggle',
-  linkList: '.social-sharing__item-list'
-};
-var classes$3 = {
-  socialSharingAction: 'social-sharing--active'
-};
-
-var socialSharing = {
-  init: function() {
-    this.$elements = $(selectors$2.socialSharing, this.$container);
-    this.clicked = false;
-
-    $(selectors$2.socialSharingToggle, this.$container)
-      .on('click', this._onClick.bind(this))
-      .one('click', function() {
-        this.clicked = true;
-      });
-
-    this.$container.on('section_unload', this.destroySocialSharing.bind(this));
-  },
-
-  showSocialSharing: function() {
-    $(selectors$2.socialSharing, this.$container).addClass(
-      classes$3.socialSharingAction
-    );
-    $(selectors$2.socialSharingToggle, this.$container).attr(
-      'aria-expanded',
-      true
-    );
-    $(selectors$2.linkList, this.$container).attr('aria-hidden', false);
-    utils.enableTabbingOfChildren($(selectors$2.linkList, this.$container));
-  },
-
-  hideSocialSharing: function() {
-    $(selectors$2.socialSharing, this.$container).removeClass(
-      classes$3.socialSharingAction
-    );
-    $(selectors$2.socialSharingToggle, this.$container).attr(
-      'aria-expanded',
-      false
-    );
-    $(selectors$2.linkList, this.$container).attr('aria-hidden', true);
-    utils.disableTabbingOfChildren($(selectors$2.linkList, this.$container));
-  },
-
-  destroySocialSharing: function() {
-    $(selectors$2.socialSharingToggle, this.$container).off();
-  },
-
-  _onClick: function(evt) {
-    if ($(evt.currentTarget).attr('aria-expanded') === 'true') {
-      this.hideSocialSharing();
-    } else {
-      this.showSocialSharing();
-    }
-  }
-};
-
-var selectors$1 = {
-  articleContentWrapper: '.article__wrapper',
-  articleShareDesktop: '.article__share-desktop',
-  articleShareMobile: '.article__share-mobile',
-  articleShareDesktopWrapper: '.article__share-desktop-wrapper',
-  socialSharing: '.social-sharing'
-};
-
-var classes$2 = {
-  shareFixed: 'article__share-desktop--fixed',
-  shareBottom: 'article__share-desktop--bottom'
-};
-
-var settings = {
-  shareExpandedHeight: 350
-};
-
-templates.register('Article Template', 'template-article', {
-  onLoad: function() {
-    this.extend(socialSharing);
-
-    $(window)
-      .on('scroll', this.setSharePosition.bind(this))
-      .on('resize', this.updateMeasurements.bind(this));
-
-    utils.promiseStylesheet().then(
-      function() {
-        this.updateMeasurements();
-      }.bind(this)
-    );
-  },
-
-  setSharePosition: function() {
-    if (utils.isMobile() || utils.isTablet()) return;
-
-    var scrollTop = $(window).scrollTop();
-
-    // Debounce DOM edits to next frame with requestAnimationFrame
-    requestAnimationFrame(
-      function() {
-        if (scrollTop > this.fixedTop) {
-          if (scrollTop > this.fixedBottom) {
-            // Fix to bottom
-            $(selectors$1.articleShareDesktop)
-              .removeClass(classes$2.shareFixed)
-              .addClass(classes$2.shareBottom);
-          } else {
-            // Fix to top
-            $(selectors$1.articleShareDesktop)
-              .addClass(classes$2.shareFixed)
-              .removeClass(classes$2.shareBottom);
-          }
-        } else {
-          // Fix to side
-          $(selectors$1.articleShareDesktop)
-            .removeClass(classes$2.shareFixed)
-            .removeClass(classes$2.shareBottom);
-        }
-
-        if (!this.clicked) {
-          if (scrollTop > this.fixedBottom - settings.shareExpandedHeight) {
-            this.showSocialSharing();
-          } else {
-            this.hideSocialSharing();
-          }
-        }
-      }.bind(this)
-    );
-  },
-
-  updateMeasurements: function() {
-    this.fixedTop = $(selectors$1.articleContentWrapper).offset().top;
-    this.fixedBottom =
-      this.fixedTop +
-      $(selectors$1.articleContentWrapper).height() -
-      $(selectors$1.articleShareDesktopWrapper).height();
-    this.windowHeight = $(window).outerHeight();
-
-    this.setSharePosition();
-  }
-});
-
-var selectors$3 = {
-  addressCountrySelect: '.address-country-selector',
-  newToggle: '.address-new-toggle',
-  newAddressContainer: '.new-address',
-  editToggle: '.address-edit-toggle',
-  editAddressContainer: '.edit-address',
-  editAddressContainerId: '#EditAddress_',
-  deleteAddress: '.address-delete',
-  currentAddresses: '.current-addresses',
-  currentAddress: '#CurrentAddress_',
-  currentAddressesItem: '.current-addresses__item'
-};
-var classes$4 = {
-  newAddressHide: 'new-address--hidden',
-  editAddressShow: 'edit-address--show'
-};
-
-templates.register(
-  'Customer Addresses Template',
-  'template-customers-addresses',
-  {
-    onLoad: function(container) {
-      var $container = (this.$container = $(container));
-      var $countryOptions = $(theme.countryOptionTags).filter('option');
-      var $addressCountrySelect = $(selectors$3.addressCountrySelect, $container);
-      var $newAddressContainer = $(selectors$3.newAddressContainer, $container);
-      var $editAddressContainers = $(
-        selectors$3.editAddressContainer,
-        $container
-      );
-
-      $addressCountrySelect.each(
-        function(index, countrySelect) {
-          var $countrySelect = this._populateCountrySelect(
-            countrySelect,
-            $countryOptions
-          );
-          var currentProvinces = this._fetchCurrentProvinces($countrySelect);
-          var $provinceSelect = $(
-            $countrySelect.attr('data-province-select'),
-            $container
-          );
-          var defaultProvince = $provinceSelect.data('default');
-
-          this._populateProvinceSelect(
-            $provinceSelect,
-            currentProvinces,
-            defaultProvince
-          );
-        }.bind(this)
-      );
-
-      $(selectors$3.newToggle).on('click', this._onNewAddressClick.bind(this));
-      $(selectors$3.editToggle).on('click', this._onEditAddressClick.bind(this));
-      $(selectors$3.deleteAddress).on(
-        'click',
-        this._onDeleteAddressClick.bind(this)
-      );
-
-      if ($('div.errors', $newAddressContainer).length !== 0) {
-        $newAddressContainer.removeClass(classes$4.newAddressHide);
-      }
-
-      $editAddressContainers.each(function() {
-        if ($('div.errors', this).length !== 0) {
-          $(this).addClass(classes$4.editAddressShow);
-        }
-      });
-    },
-
-    _populateCountrySelect: function(countrySelect, countryOptions) {
-      var $countrySelect = $(countrySelect);
-      var defaultValue = $countrySelect.data('default');
-      var defaultOption = countryOptions[0];
-
-      // If the country <select> has a default value already set, that country
-      // value is written in the theme language (not always english). The <option>
-      // value attribute in the country <select> are always in English. We need to
-      // find the <option> that has the same .text value as our default value.
-      if (typeof defaultValue === 'string' && defaultValue !== '') {
-        defaultOption = find(countryOptions, function(el) {
-          return el.text === defaultValue;
-        });
-      }
-
-      return $countrySelect
-        .html(countryOptions.clone())
-        .val(defaultOption.value)
-        .on('change', this._onCountrySelectChange.bind(this));
-    },
-
-    _populateProvinceSelect: function(
-      $provinceSelect,
-      provinces,
-      defaultValue
-    ) {
-      var $container = $provinceSelect.parent();
-      var provinceOptions = provinces.map(this._createProvinceOption);
-      var value = defaultValue || $(provinceOptions[0]).val();
-
-      if (provinceOptions.length) {
-        $container.show();
-      } else {
-        $container.hide();
-      }
-
-      return $provinceSelect.html(provinceOptions).val(value);
-    },
-
-    _createProvinceOption: function(province) {
-      return $('<option>')
-        .attr({
-          value: province[0]
-        })
-        .text(province[1]);
-    },
-
-    _fetchCurrentProvinces: function($countrySelect) {
-      return $countrySelect.find(':selected').data('provinces') || [];
-    },
-
-    _onCountrySelectChange: function(event) {
-      var $countrySelect = $(event.target);
-      var currentProvinces = this._fetchCurrentProvinces($countrySelect);
-      var $provinceSelect = $($countrySelect.data('province-select'));
-
-      this._populateProvinceSelect($provinceSelect, currentProvinces);
-    },
-
-    _onNewAddressClick: function() {
-      $(selectors$3.newAddressContainer, this.$container).toggleClass(
-        classes$4.newAddressHide
-      );
-    },
-
-    _onEditAddressClick: function(event) {
-      var formId = $(event.target).data('form-id');
-      $(selectors$3.editAddressContainerId + formId, this.$container).toggleClass(
-        classes$4.editAddressShow
-      );
-    },
-
-    _onDeleteAddressClick: function(event) {
-      var $button = $(event.target);
-      var formId = $button.data('form-id');
-      var addressUrl = $button.data('address-url');
-      var confirmMessage = $button.data('confirm-message');
-      var $container = $(selectors$3.currentAddress + formId, this.$container);
-
-      if (confirm(confirmMessage)) {
-        // eslint-disable-line no-alert
-        $.post(addressUrl, {
-          _method: 'delete'
-        });
-        $container.remove();
-
-        if (!$(selectors$3.currentAddressesItem).length) {
-          $(selectors$3.currentAddresses, this.$container).remove();
-          $(selectors$3.newAddressContainer, this.$container).removeClass(
-            classes$4.newAddressHide
-          );
-        }
-      }
-    }
-  }
-);
-
-var selectors$4 = {
-  recoverPasswordForm: '#RecoverPasswordForm',
-  customerLoginForm: '#CustomerLoginForm',
-  hideRecoverPasswordLink: '#HideRecoverPasswordLink',
-  showRecoverPasswordLink: '#RecoverPassword'
-};
-
-templates.register('Customer Login Template', 'template-customers-login', {
-  onLoad: function(container) {
-    var $container = (this.$container = $(container));
-
-    this.checkUrlHash();
-    this.resetPasswordSuccess();
-
-    $(selectors$4.showRecoverPasswordLink, $container).on(
-      'click',
-      this.onShowHidePasswordForm.bind(this)
-    );
-    $(selectors$4.hideRecoverPasswordLink, $container).on(
-      'click',
-      this.onShowHidePasswordForm.bind(this)
-    );
-  },
-
-  onShowHidePasswordForm: function(evt) {
-    evt.preventDefault();
-    this.toggleRecoverPasswordForm();
-  },
-
-  checkUrlHash: function() {
-    var hash = window.location.hash;
-
-    if (hash === '#recover') {
-      this.toggleRecoverPasswordForm();
-    }
-  },
-
-  toggleRecoverPasswordForm: function() {
-    $(selectors$4.recoverPasswordForm).toggleClass('hide');
-    $(selectors$4.customerLoginForm).toggleClass('hide');
-  },
-
-  resetPasswordSuccess: function() {
-    if (!$('.reset-password-success').length) {
-      return;
-    }
-
-    $('#ResetSuccess').removeClass('hide');
-  }
-});
-
-if (!Element.prototype.matches) {
-    Element.prototype.matches =
-        Element.prototype.matchesSelector ||
-        Element.prototype.msMatchesSelector ||
-        Element.prototype.webkitMatchesSelector;
-}
-
-/**
- * Rich Text Editor
- * -----------------------------------------------------------------------------
- * Wrap videos in div to force responsive layout.
- *
- * @namespace rte
- */
-
-var rte = {
-  wrapTable: function() {
-    $('.rte table').wrap('<div class="rte__table-wrapper"></div>');
-  },
-
-  iframeReset: function() {
-    var $iframeVideo = $(
-      '.rte iframe[src*="youtube.com/embed"], .rte iframe[src*="player.vimeo"]'
-    );
-    var $iframeReset = $iframeVideo.add('.rte iframe#admin_bar_iframe');
-
-    $iframeVideo.each(function() {
-      // Add wrapper to make video responsive
-      $(this).wrap('<div class="video-wrapper"></div>');
-    });
-
-    $iframeReset.each(function() {
-      // Re-set the src attribute on each iframe after page load
-      // for Chrome's "incorrect iFrame content on 'back'" bug.
-      // https://code.google.com/p/chromium/issues/detail?id=395791
-      // Need to specifically target video and admin bar
-      this.src = this.src;
-    });
-  },
-
-  imageLink: function() {
-    // Add class to remove underline on image links.
-    $('.rte a:has(img)').addClass('image-link');
-  }
-};
-
-templates.register('Page Helpers', '*', {
-  onLoad: function() {
-    this.pageLinkFocus();
-    this.rteFixes();
-    this.disableOutlineOnClick();
-    this.checkIfMobileOS();
-  },
-
-  pageLinkFocus: function() {
-    // Common a11y fixes
-    a11y.focusHash({
-      className: 'js-focus-hidden'
-    });
-
-    a11y.bindInPageLinks({
-      className: 'js-focus-hidden',
-      ignore: '[data-link-no-focus]'
-    });
-  },
-
-  rteFixes: function() {
-    // Wrap videos in div to force responsive layout.
-    rte.wrapTable();
-    rte.iframeReset();
-    // Remove underline on image links.
-    rte.imageLink();
-  },
-
-  disableOutlineOnClick: function() {
-    // Disable focus outline when clicking, enable when navigating with keys
-    var classes = {
-      outlineDisabled: 'outline-disabled'
-    };
-
-    $('html').addClass(classes.outlineDisabled);
-
-    $(document).on('keyup', function() {
-      $('html').removeClass(classes.outlineDisabled);
-    });
-
-    $(document).on('click', function(evt) {
-      $('html').toggleClass(
-        classes.outlineDisabled,
-        !$(evt.target).is('input, textarea, select, button')
-      );
-    });
-  },
-
-  checkIfMobileOS: function() {
-    var ua = navigator.userAgent.toLowerCase();
-    var isIOS = /ipad|iphone|ipod/.test(ua) && !window.MSStream;
-    var isAndroid = /android/.test(ua);
-
-    if (isIOS) {
-      $('html')
-        .addClass('is-mobile-os')
-        .addClass('is-ios');
-    }
-    if (isAndroid) {
-      $('html')
-        .addClass('is-mobile-os')
-        .addClass('is-android');
-    }
-  }
-});
-
-/**
- * A11y Helpers
- * -----------------------------------------------------------------------------
- * A collection of useful functions that help make your theme more accessible
- * to users with visual impairments.
- *
- *
- * @namespace a11y
- */
-
-var a11y$1 = {
-  /**
-   * For use when focus shifts to a container rather than a link
-   * eg for In-page links, after scroll, focus shifts to content area so that
-   * next `tab` is where user expects if focusing a link, just $link.focus();
-   *
-   * @param {JQuery} $element - The element to be acted upon
-   */
-  pageLinkFocus: function($element) {
-    var focusClass = 'js-focus-hidden';
-
-    $element
-      .first()
-      .attr('tabIndex', '-1')
-      .focus()
-      .addClass(focusClass)
-      .one('blur', callback);
-
-    function callback() {
-      $element
-        .first()
-        .removeClass(focusClass)
-        .removeAttr('tabindex');
-    }
-  },
-
-  /**
-   * Attempts to focus an element, and if unsuccessful adds tabindex to the
-   * element and focuses it. Tabindex is removed on element blur.
-   *
-   * @param {jQuery} $element - The element to be focused
-   */
-  forceFocus: function($element) {
-    $element.focus();
-
-    if (!$element.is(document.activeElement)) {
-      $element
-        .attr('tabindex', '0')
-        .focus()
-        .one('blur', function() {
-          $element.removeAttr('tabindex');
-        });
-    }
-  },
-
-  /**
-   * If there's a hash in the url, focus the appropriate element
-   */
-  focusHash: function() {
-    var hash = window.location.hash;
-
-    // is there a hash in the url? is it an element on the page?
-    if (hash && document.getElementById(hash.slice(1))) {
-      this.pageLinkFocus($(hash));
-    }
-  },
-
-  /**
-   * When an in-page (url w/hash) link is clicked, focus the appropriate element
-   */
-  bindInPageLinks: function() {
-    $('a[href*=#]').on(
-      'click',
-      function(evt) {
-        this.pageLinkFocus($(evt.currentTarget.hash));
-      }.bind(this)
-    );
-  },
-
-  /**
-   * Traps the focus in a particular container
-   *
-   * @param {object} options - Options to be used
-   * @param {jQuery} options.$container - Container to trap focus within
-   * @param {jQuery} options.$elementToFocus - Element to be focused when focus leaves container
-   * @param {string} options.namespace - Namespace used for new focus event handler
-   */
-  trapFocus: function(options) {
-    var eventName = options.namespace
-      ? 'focusin.' + options.namespace
-      : 'focusin';
-
-    if (!options.$elementToFocus) {
-      options.$elementToFocus = options.$container;
-    }
-
-    options.$container.attr('tabindex', '-1');
-    options.$elementToFocus.focus();
-
-    $(document).on(eventName, function(evt) {
-      if (
-        options.$container[0] !== evt.target &&
-        !options.$container.has(evt.target).length
-      ) {
-        options.$container.focus();
-      }
-    });
-  },
-
-  /**
-   * Removes the trap of focus in a particular container
-   *
-   * @param {object} options - Options to be used
-   * @param {jQuery} options.$container - Container to trap focus within
-   * @param {string} options.namespace - Namespace used for new focus event handler
-   */
-  removeTrapFocus: function(options) {
-    var eventName = options.namespace
-      ? 'focusin.' + options.namespace
-      : 'focusin';
-
-    if (options.$container && options.$container.length) {
-      options.$container.removeAttr('tabindex');
-    }
-
-    $(document).off(eventName);
-  }
-};
-
-/**
- *  prepareTransition
- *  jQuery Plugin for ensuring transitions with display:none or visibility:hidden
- *  are in the right state until the end of the transition
- *
- *  Developed by Jonathan Snook (http://snook.ca/)
- *  January 12, 2012
- *
- *  Requires the following CSS:
- *  .is-transitioning {
- *      display: block !important;
- *      visibility: visible !important;
- *  }
- *
- *  MIT license
- *  http://www.opensource.org/licenses/mit-license.php
- */
-
-$.fn.prepareTransition = function(){
-  return this.each(function(){
-    var el = $(this);
-    // remove the transition class upon completion
-    el.one('TransitionEnd webkitTransitionEnd transitionend oTransitionEnd', function(){
-      el.removeClass('is-transitioning');
-    });
-
-    // check the various CSS properties to see if a duration has been set
-    var cl = ["transition-duration", "-moz-transition-duration", "-webkit-transition-duration", "-o-transition-duration"];
-    var duration = 0;
-    $.each(cl, function(idx, itm){
-      duration || (duration = parseFloat( el.css( itm ) ));
-    });
-
-    // if I have a duration then add the class
-    if (duration != 0) {
-      el.addClass('is-transitioning');
-      el[0].offsetWidth; // check offsetWidth to force the style rendering
-    }
+/* eslint-enable babel/no-invalid-this */
+
+function promiseTransitionEnd(element) {
+  const events = [
+    'webkitTransitionEnd',
+    'otransitionend',
+    'oTransitionEnd',
+    'msTransitionEnd',
+    'transitionend',
+  ];
+
+  const properties = [
+    'WebkitTransition',
+    'MozTransition',
+    'OTransition',
+    'msTransition',
+    'transition',
+  ];
+
+  let duration = 0;
+  let promise = Promise.resolve();
+
+  properties.forEach(() => {
+    /* eslint-disable-next-line */
+    duration ||
+      (duration = parseFloat(
+        window.getComputedStyle(element).transitionDuration
+      ));
   });
-};
 
-var selectors$5 = {
-  passwordModal: '.password-modal',
-  modalOpenButton: '.password__open-modal',
-  modalCloseButton: '.password-modal__close',
-  modalInput: '.password-modal__input'
-};
-var classes$5 = {
-  passwordModalOpen: 'password-modal--open',
-  disableScroll: 'disable-scroll'
-};
+  if (duration > 0) {
+    promise = new Promise((resolve) => {
+      const handlers = events.map((event) => {
+        element.addEventListener(event, handler);
+        return {
+          event,
+          handler,
+        };
+      });
 
-templates.register('Password Template', 'password-template', {
-  onLoad: function(container) {
-    var $container = (this.$container = $(container));
+      function handler(event) {
+        if (event.target !== element) return;
 
-    $(selectors$5.modalOpenButton, $container).on(
-      'click',
-      this.showPasswordModal.bind(this)
-    );
-    $(selectors$5.modalCloseButton, $container).on(
-      'click',
-      this.hidePasswordModal.bind(this)
-    );
+        // eslint-disable-next-line no-shadow
+        handlers.forEach(({ event, handler }) => {
+          element.removeEventListener(event, handler);
+        });
 
-    if ($('.errors', $container).length) {
-      this.showPasswordModal();
-    }
-  },
-
-  showPasswordModal: function() {
-    var $container = this.$container;
-    var $modal = $(selectors$5.passwordModal, $container);
-
-    a11y$1.trapFocus({
-      $container: $modal,
-      namespace: 'passwordModal',
-      $elementToFocus: $(selectors$5.modalCloseButton, $container)
+        resolve();
+      }
     });
+  }
 
-    $modal.prepareTransition().addClass(classes$5.passwordModalOpen);
+  return promise;
+}
 
-    $(selectors$5.modalOpenButton, $container).attr('aria-expanded', true);
-    $(selectors$5.modalInput, $container).focus();
-    $(document.documentElement).addClass(classes$5.disableScroll);
-    $(document).on('keyup', this.closeOnEscape.bind(this));
-  },
+function cookiesEnabled() {
+  let cookieEnabled = window.navigator.cookieEnabled;
 
-  hidePasswordModal: function() {
-    var $container = this.$container;
-    var $modal = $(selectors$5.passwordModal, $container);
+  if (!cookieEnabled) {
+    document.cookie = 'testcookie';
+    cookieEnabled = document.cookie.indexOf('testcookie') !== -1;
+  }
+  return cookieEnabled;
+}
 
-    a11y$1.removeTrapFocus({ namespace: 'passwordModal' });
+function resizeSelectInput(selectInput) {
+  const arrowWidth = 50;
 
-    $modal.prepareTransition().removeClass(classes$5.passwordModalOpen);
+  const test = document.createElement('span');
+  test.innerHTML = selectInput.selectedOptions[0].label;
 
-    $(document.documentElement).removeClass(classes$5.disableScroll);
-    $(selectors$5.modalOpenButton, $container)
-      .attr('aria-expanded', false)
-      .focus();
+  document.querySelector('.footer').appendChild(test);
 
-    $(document).off('keyup', this.closeOnEscape.bind(this));
-  },
+  const width = test.offsetWidth;
+  test.remove();
 
-  closeOnEscape: function(evt) {
-    if (evt.keyCode === 27) {
-      this.hidePasswordModal();
+  selectInput.style.width = `${width + arrowWidth}px`;
+}
+
+function isIntersectionObserverAvailable() {
+  if (
+    'IntersectionObserver' in window &&
+    'IntersectionObserverEntry' in window &&
+    'intersectionRatio' in window.IntersectionObserverEntry.prototype
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function getMediaQueryString(width, limit = 'min') {
+  const mediaQueries = {
+    medium: '46.85em',
+    large: '61.85em',
+    widescreen: '87.5em',
+  };
+
+  return `(${limit}-width: ${mediaQueries[width]})`;
+}
+
+const selectors = {
+  stage: 'data-popup-stage',
+  popup: 'data-popup',
+  open: 'data-popup-open',
+  close: 'data-popup-close',
+  focus: 'data-popup-focus',
+};
+
+const classes = {
+  open: 'is-open',
+  transitionReady: 'transition-ready',
+  preventScrolling: 'prevent-scrolling',
+};
+
+class Popup {
+  constructor(popup) {
+    this.name = popup;
+  }
+
+  init() {
+    this.elements = this._getElements();
+    this._bindEvents();
+    this.keyUpHandler = this._onKeyUp.bind(this);
+    this.scrollPosition = window.pageYOffset;
+  }
+
+  openPopup(event) {
+    if (event.preventDefault) event.preventDefault();
+    this._prepareAnimation();
+    this.elements.stage.classList.add(classes.open);
+    this._sleepAnimation();
+
+    if (this.elements.focus) {
+      _shopify_themeA11y.trapFocus(this.elements.popup, { elementToFocus: this.elements.focus });
+    } else {
+      _shopify_themeA11y.trapFocus(this.elements.popup);
+    }
+
+    this.elements.triggerNode = event.currentTarget;
+    this.elements.triggerNode.setAttribute('aria-expanded', true);
+    this._enableScrollLock();
+
+    document.addEventListener('keyup', this.keyUpHandler);
+  }
+
+  closePopup(removeFocus = true) {
+    this._prepareAnimation();
+    this.elements.stage.classList.remove(classes.open);
+    this._sleepAnimation();
+
+    if (removeFocus) {
+      _shopify_themeA11y.removeTrapFocus();
+      this.elements.triggerNode.focus();
+      document.removeEventListener('keyup', this.keyUpHandler);
+    }
+
+    this.elements.triggerNode.setAttribute('aria-expanded', false);
+    this._disableScrollLock();
+
+    this.elements.triggerNode.dispatchEvent(
+      new window.CustomEvent('popup_closed')
+    );
+  }
+
+  getElements() {
+    return this.elements;
+  }
+
+  resetContainerFocus() {
+    _shopify_themeA11y.removeTrapFocus();
+
+    if (this.elements.focus) {
+      _shopify_themeA11y.trapFocus(this.elements.popup, { elementToFocus: this.elements.focus });
+    } else {
+      _shopify_themeA11y.trapFocus(this.elements.popup);
     }
   }
-});
 
-function Sections() {
-  this.$document = $(document);
-  this.namespace = '.section-js-events';
+  _prepareAnimation() {
+    this.elements.stage.classList.add(classes.transitionReady);
+  }
 
-  document.addEventListener(
-    'shopify:section:load',
-    function(evt) {
-      var id = evt.detail.sectionId;
-      var container = evt.target.querySelector(
-        '[data-section-id="' + id + '"]'
-      );
-      var type = container.getAttribute('data-section-type');
+  _sleepAnimation() {
+    return promiseTransitionEnd(this.elements.popup).then(() => {
+      this.elements.stage.classList.remove(classes.transitionReady);
+    });
+  }
 
-      this.load(type, container);
-    }.bind(this)
+  _getElements() {
+    return {
+      stage: document.querySelector(`[${selectors.stage}=${this.name}]`),
+      popup: document.querySelector(`[${selectors.popup}=${this.name}]`),
+      open: document.querySelectorAll(`[${selectors.open}=${this.name}]`),
+      close: document.querySelectorAll(`[${selectors.close}=${this.name}]`),
+      focus: document.querySelector(`[${selectors.focus}=${this.name}]`),
+    };
+  }
+
+  _bindEvents() {
+    this.elements.open.forEach((openButton) => {
+      openButton.addEventListener('click', (event) => this.openPopup(event));
+    });
+
+    this.elements.close.forEach((closeButton) => {
+      closeButton.addEventListener('click', () => this.closePopup());
+    });
+  }
+
+  _enableScrollLock() {
+    this.scrollPosition = window.pageYOffset;
+    document.body.style.top = `-${this.scrollPosition}px`;
+    document.body.classList.add(classes.preventScrolling);
+  }
+
+  _disableScrollLock() {
+    document.body.classList.remove(classes.preventScrolling);
+    document.body.style.removeProperty('top');
+    window.scrollTo(0, this.scrollPosition);
+  }
+
+  _onKeyUp(event) {
+    if (event.key.toLowerCase() === keyCodes.ESC) this.closePopup();
+  }
+}
+
+function getDefaultRequestConfig() {
+  return JSON.parse(
+    JSON.stringify({
+      credentials: 'same-origin',
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        'Content-Type': 'application/json;'
+      }
+    })
   );
 }
 
-$.extend(Sections.prototype, {
-  /**
-   * Indexed list of all registered section types
-   */
-  registered: {},
-
-  /**
-   * List of all section instances
-   */
-  instances: [],
-
-  /**
-   * Indexed list of all registered global extensions
-   */
-  extensions: {
-    '*': []
-  },
-
-  /**
-   * Registers a section type with properties. Adds a new section constructor to
-   * the registered list of sections.
-   *
-   * @param {string} type
-   * @param {object} properties
-   */
-  register: function(type, properties) {
-    function Section(data) {
-      this.type = type;
-      Master$1.call(this, data);
+function fetchJSON(url, config) {
+  return fetch(url, config).then(function(response) {
+    if (!response.ok) {
+      throw response;
     }
+    return response.json();
+  });
+}
 
-    Section.constructor = this.registered[type];
-    Section.prototype = Object.create(Master$1.prototype);
-    $.extend(Section.prototype, properties);
+function cart() {
+  return fetchJSON('/cart.js', getDefaultRequestConfig());
+}
 
-    this.registered[type] = Section;
-  },
 
-  /**
-   * Loads all or the specified section types
-   */
-  load: function(types, containers) {
-    types = this._normalizeTypeParam(types);
-    containers = this._normalizeContainersParam(containers);
 
-    types.forEach(
-      function(type) {
-        var Section = this.registered[type];
-        var selection = containers;
+function cartAddFromForm(formData) {
+  var config = getDefaultRequestConfig();
+  delete config.headers['Content-Type'];
 
-        if (typeof Section === 'undefined') {
-          return;
-        }
+  config.method = 'POST';
+  config.body = formData;
 
-        if (typeof selection === 'undefined') {
-          selection = document.querySelectorAll(
-            '[data-section-type="' + type + '"]'
-          );
-        }
+  return fetchJSON('/cart/add.js', config);
+}
 
-        // Convert selection NodeList into an array
-        selection = Array.prototype.slice.call(selection);
+function cartChange(line, options) {
+  var config = getDefaultRequestConfig();
 
-        selection.forEach(
-          function(container) {
-            if (this._instanceExists(container)) {
-              return;
-            }
+  options = options || {};
 
-            var extensions = this.extensions['*'].concat(
-              this.extensions[type] || []
-            );
-            var instance = new Section({
-              container: container,
-              extensions: extensions,
-              id: container.getAttribute('data-section-id')
-            });
+  config.method = 'POST';
+  config.body = JSON.stringify({
+    line: line,
+    quantity: options.quantity,
+    properties: options.properties
+  });
 
-            instance.trigger('section_load');
+  return fetchJSON('/cart/change.js', config);
+}
 
-            this.instances.push(instance);
-          }.bind(this)
-        );
-      }.bind(this)
+
+
+function cartUpdate(body) {
+  var config = getDefaultRequestConfig();
+
+  config.method = 'POST';
+  config.body = JSON.stringify(body);
+
+  return fetchJSON('/cart/update.js', config);
+}
+
+function key(key) {
+  if (typeof key !== 'string' || key.split(':').length !== 2) {
+    throw new TypeError(
+      'Theme Cart: Provided key value is not a string with the format xxx:xxx'
     );
-  },
-
-  /**
-   * Extend single, multiple, or all sections with additional functionality.
-   */
-  extend: function(types, extension) {
-    types = this._normalizeTypeParam(types);
-
-    types.forEach(
-      function(type) {
-        this.extensions[type] = this.extensions[type] || [];
-        this.extensions[type].push(extension);
-
-        if (typeof this.registered[type] === 'undefined') {
-          return;
-        }
-
-        this.instances.forEach(function(instance) {
-          if (instance.type !== type) {
-            return;
-          }
-          instance.extend(extension);
-        });
-      }.bind(this)
-    );
-  },
-
-  /**
-   * Checks if a particular section type has been loaded on the page.
-   */
-  isInstance: function(type) {
-    return typeof find(this.instances, { type: type }) === 'object';
-  },
-
-  /**
-   * Returns all instances of a section type on the page.
-   */
-  getInstances: function(type) {
-    return $.Deferred(
-      function(defer) {
-        var instances = filter(this.instances, { type: type });
-
-        if (instances.length === 0) {
-          defer.reject();
-        } else {
-          defer.resolve(instances);
-        }
-      }.bind(this)
-    );
-  },
-
-  /**
-   * Attaches an event handler to the document that is fired whenever any section
-   * instance triggers an event of specified type. Automatically adds a namespace
-   * for easy removal with `sections.off('event')`
-   */
-  on: function() {
-    // Convert arguments object into an array
-    var args = Array.prototype.slice.call(arguments);
-
-    // Apply the section namespace to any event handler created by this section
-    args[0] = args[0].concat(this.namespace);
-
-    this.$document.on.apply(this.$document, args);
-  },
-
-  /**
-   * Removes an event handler attached using `sections.on()`.
-   */
-  off: function() {
-    // Convert arguments object into an array
-    var args = Array.prototype.slice.call(arguments);
-
-    // Apply the section namespace to any event handler created by this section
-    args[0] = args[0].concat(this.namespace);
-
-    this.$document.off.apply(this.$document, arguments);
-  },
-
-  /**
-   * Triggers and event in every section instance
-   */
-  trigger: function() {
-    var triggerArgs = arguments;
-    this.instances.forEach(function(instance) {
-      instance.trigger.apply(instance, triggerArgs);
-    });
-  },
-
-  _sectionTrigger: function() {
-    this.$document.trigger.apply(this.$document, arguments);
-  },
-
-  _normalizeTypeParam: function(types) {
-    if (types === '*') {
-      types = Object.keys(this.registered);
-    } else if (typeof types === 'string') {
-      types = [types];
-    }
-
-    types = types.map(function(type) {
-      return type.toLowerCase();
-    });
-
-    return types;
-  },
-
-  _normalizeContainersParam: function(containers) {
-    if (!Array.isArray(containers) && typeof containers === 'object') {
-      // If a single container object is specified not inside a function
-      containers = [containers];
-    }
-    return containers;
-  },
-
-  _instanceExists: function(container) {
-    var instance = find(this.instances, {
-      id: container.getAttribute('data-section-id')
-    });
-    return typeof instance !== 'undefined';
   }
-});
+}
 
-var sections = new Sections();
+function quantity(quantity) {
+  if (typeof quantity !== 'number' || isNaN(quantity)) {
+    throw new TypeError(
+      'Theme Cart: An object which specifies a quantity or properties value is required'
+    );
+  }
+}
+
+function id(id) {
+  if (typeof id !== 'number' || isNaN(id)) {
+    throw new TypeError('Theme Cart: Variant ID must be a number');
+  }
+}
+
+function properties(properties) {
+  if (typeof properties !== 'object') {
+    throw new TypeError('Theme Cart: Properties must be an object');
+  }
+}
+
+function form(form) {
+  if (!(form instanceof HTMLFormElement)) {
+    throw new TypeError('Theme Cart: Form must be an instance of HTMLFormElement');
+  }
+}
+
+function options(options) {
+  if (typeof options !== 'object') {
+    throw new TypeError('Theme Cart: Options must be an object');
+  }
+
+  if (
+    typeof options.quantity === 'undefined' &&
+    typeof options.properties === 'undefined'
+  ) {
+    throw new Error(
+      'Theme Cart: You muse define a value for quantity or properties'
+    );
+  }
+
+  if (typeof options.quantity !== 'undefined') {
+    quantity(options.quantity);
+  }
+
+  if (typeof options.properties !== 'undefined') {
+    properties(options.properties);
+  }
+}
+
 /**
- * Master section class that all sections inherit from
- * @constructor
+ * Cart Template Script
+ * ------------------------------------------------------------------------------
+ * A file that contains scripts highly couple code to the Cart template.
  *
+ * @namespace cart
  */
-function Master$1(data) {
-  this.container = data.container;
-  this.$container = $(this.container);
-  this.id = data.id;
-  this.namespace = '.' + data.id;
-  this.extensions = data.extensions || [];
-  this.$eventBinder = this.$container;
-
-  _applyExtensions.call(this);
-  _applyEditorHandlers.call(this);
-  _applyDefaultHandlers.call(this);
-}
-
-Master$1.prototype = {
-  /* eslint-disable no-empty-function */
-  onLoad: function() {},
-  onUnload: function() {},
-  onSelect: function() {},
-  onDeselect: function() {},
-  onBlockSelect: function() {},
-  onBlockDeselect: function() {},
-
-  /* eslint-enable no-empty-function */
-
-  /**
-   * Attaches an event handler to an instance of a section. Only listens to
-   * events triggered by that section instance.
-   */
-  on: function() {
-    // Convert arguments object into an array
-    var args = Array.prototype.slice.call(arguments);
-
-    // Apply the section namespace to any event handler created by this section
-    args[0] = args[0].concat(this.namespace);
-
-    this.$eventBinder.on.apply(this.$eventBinder, args);
-    this.$eventBinder = this.$container;
-  },
-
-  /**
-   * Attaches an event handler to an instance of a section that is removed after
-   * being called once. Only listens to events triggered by that section instance.
-   */
-  one: function() {
-    // Convert arguments object into an array
-    var args = Array.prototype.slice.call(arguments);
-
-    // Apply the section namespace to any event handler created by this section
-    args[0] = args[0].concat(this.namespace);
-
-    this.$eventBinder.one.apply(this.$eventBinder, args);
-    this.$eventBinder = this.$container;
-  },
-
-  /**
-   * Removes an event handler that was attached using the `this.on()` method
-   */
-  off: function() {
-    // Convert arguments object into an array
-    var args = Array.prototype.slice.call(arguments);
-
-    // Apply the section namespace to any event handler created by this section
-    args[0] = args[0] || '';
-    args[0] = args[0].concat(this.namespace);
-
-    this.$eventBinder.off.apply(this.$eventBinder, arguments);
-    this.$eventBinder = this.$container;
-  },
-
-  /*
-   * Triggers an event on both this section instance and the sections object so
-   * so that any event handlers attached using `sections.on()` will be also
-   * triggered.
-   */
-  trigger: function() {
-    // Convert arguments object into an array
-    var args = Array.prototype.slice.call(arguments);
-
-    // Check what the second argument is. If there is already an array keep it.
-    args[1] = args[1] || [];
-
-    // Add the section instance as the first item in the array. This will force
-    // it to be the first param in the .on() callback
-    args[1].splice(0, 0, this);
-
-    this.$eventBinder.trigger.apply(this.$eventBinder, args);
-    this.$eventBinder = this.$container;
-  },
-
-  /**
-   * Extends this section instance with additional functionality.
-   */
-  extend: function(extension) {
-    var init = extension.init;
-    this.extensions.push(extension);
-
-    $.extend(this, omit(extension, 'init'));
-
-    if ($.isFunction(init)) {
-      init.apply(this);
-    }
-  }
-};
 
 /**
- * Shortcut methods that are automatically namespaced for easy removal, e.g.
- * $(document).on('event' + this.namespace);
+ * Returns the state object of the cart
+ * @returns {Promise} Resolves with the state object of the cart (https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#get-cart)
  */
-Master$1.prototype.document = function() {
-  var $document = $(document);
-  var self = this;
-  return {
-    on: function() {
-      self.$eventBinder = $document;
-      self.on.apply(self, arguments);
-    },
-    off: function() {
-      self.$eventBinder = $document;
-      self.off.apply(self, arguments);
-    },
-    trigger: function() {
-      self.$eventBinder = $document;
-      self.trigger.apply(self, arguments);
-    }
-  };
-};
+function getState() {
+  return cart();
+}
 
 /**
- * Shortcut methods that are automatically namespaced for easy removal, e.g.
- * $(window).on('event' + this.namespace);
+ * Returns the index of the cart line item
+ * @param {string} key The unique key of the line item
+ * @returns {Promise} Resolves with the index number of the line item
  */
-Master$1.prototype.window = function() {
-  var $window = $(window);
-  var self = this;
-  return {
-    on: function() {
-      self.$eventBinder = $window;
-      self.on.apply(self, arguments);
-    },
-    off: function() {
-      self.$eventBinder = $window;
-      self.off.apply(self, arguments);
-    },
-    trigger: function() {
-      self.$eventBinder = $window;
-      self.trigger.apply(self, arguments);
-    }
-  };
-};
+function getItemIndex(key$$1) {
+  key(key$$1);
 
-function _applyExtensions() {
-  this.extensions.forEach(
-    function(extension) {
-      this.extend(extension);
-    }.bind(this)
-  );
-}
+  return cart().then(function(state) {
+    var index = -1;
 
-function _applyEditorHandlers() {
-  $(document)
-    .on('shopify:section:unload' + this.namespace, _onSectionUnload.bind(this))
-    .on('shopify:section:select' + this.namespace, _onSelect.bind(this))
-    .on('shopify:section:deselect' + this.namespace, _onDeselect.bind(this))
-    .on('shopify:block:select' + this.namespace, _onBlockSelect.bind(this))
-    .on('shopify:block:deselect' + this.namespace, _onBlockDeselect.bind(this));
-}
-
-function _applyDefaultHandlers() {
-  this.on('section_load', this.onLoad.bind(this));
-  this.on('section_unload', this.onUnload.bind(this));
-  this.on('section_select', this.onSelect.bind(this));
-  this.on('section_deselect', this.onDeselect.bind(this));
-  this.on('block_select', this.onBlockSelect.bind(this));
-  this.on('block_deselect', this.onBlockDeselect.bind(this));
-}
-
-function _onSectionUnload(event) {
-  if (this.id !== event.detail.sectionId) return;
-
-  event.type = 'section_unload';
-  this.trigger(event);
-
-  this.off(this.namespace);
-  sections.off(this.namespace);
-  $(document).off(this.namespace);
-  $(window).off(this.namespace);
-
-  remove(sections.instances, { id: this.id });
-}
-
-function _onSelect(event) {
-  if (this.id !== event.detail.sectionId) return;
-
-  event.type = 'section_select';
-  this.trigger(event);
-}
-
-function _onDeselect(event) {
-  if (this.id !== event.detail.sectionId) return;
-
-  event.type = 'section_deselect';
-  this.trigger(event);
-}
-
-function _onBlockSelect(event) {
-  if (this.id !== event.detail.sectionId) return;
-
-  event.type = 'block_select';
-  this.trigger(event);
-}
-
-function _onBlockDeselect(event) {
-  if (this.id !== event.detail.sectionId) return;
-
-  event.type = 'block_deselect';
-  this.trigger(event);
-}
-
-/*
-
-Card Manager Extension
---------------------------------------------------------------------------------
-Manages the drawer functionilty of the cart drawer section
-
-
-Events
-------------
-
-Name: cards_load_start
-Description: Fired before cards start to load
-Payload: none
-
-Name: card_loaded
-Description: Fired each time a card is loaded onto the page
-Payload: { object } Card DOM element
-
-Name: cards_load_done
-Description: Fired when all cards have loaded
-Payload: none
-
-*/
-
-var classes$6 = {
-  cardListSubLoaded: 'card-list__sub-actions--loaded',
-  cardReveal: 'card--reveal',
-  searchTemplate: 'template-search'
-};
-
-var selectors$6 = {
-  cardList: '.card-list',
-  cardListColumn: '.card-list__column',
-  cardListSub: '.card-list__sub-actions',
-  card: '.card',
-  cardWrapper: '.card__wrapper',
-  cardInfo: '.card__info'
-};
-
-var cardManager = {
-  init: function() {
-    this.$cardList = $(selectors$6.cardList, this.$container);
-    this.$emptyColumn = $(selectors$6.cardListColumn, this.$container)
-      .clone()
-      .empty();
-    this.$cards = $(selectors$6.card, this.$container);
-
-    this.desktopColumnCount = this.$cardList.data('desktop-columns') || 2;
-    this.mobileColumnCount = this.$cardList.data('mobile-columns') || 1;
-    this.columnCount = utils.isMobile()
-      ? this.mobileColumnCount
-      : this.desktopColumnCount;
-    this.gridStyle = this.$cardList.data('grid-style') || 'collage';
-    this.windowWidth = $(window).outerWidth();
-    this.cardLoadPromises = [];
-
-    this.window().on('resize', this._onResize.bind(this));
-
-    this.on('keydown', selectors$6.cardWrapper, this._onCardTabDown.bind(this));
-    this.on('keyup', this._onCardTabUp.bind(this));
-
-    utils.promiseStylesheet().then(
-      function() {
-        this.cardsLoaded = this._loadCards();
-
-        $('html').removeClass('site-footer--hidden');
-
-        $(selectors$6.cardListSub, this.$container)
-          .prepareTransition()
-          .addClass(classes$6.cardListSubLoaded);
-      }.bind(this)
-    );
-  },
-
-  _onResize: function() {
-    var columnCount = utils.isMobile()
-      ? this.mobileColumnCount
-      : this.desktopColumnCount;
-
-    // Only replace columns if the number of columns changes.
-    if (this.columnCount !== columnCount) {
-      this.columnCount = columnCount;
-      this.$columns = this._replaceColumns();
-    }
-
-    $.each(
-      this.$cards,
-      function(index) {
-        if (utils.isMobile()) {
-          this.$columns.find(selectors$6.cardWrapper).removeAttr('style');
-        } else if (this._isAlignedRow(index + 1)) {
-          var rowNumber =
-            (index - (index % this.desktopColumnCount)) /
-              this.desktopColumnCount +
-            1;
-          this._matchRowHeights(this.$columns, rowNumber);
-        }
-      }.bind(this)
-    );
-  },
-
-  _onCardTabDown: function(evt) {
-    if (evt.keyCode !== 9) return; // Only continue if tab key is pressed
-
-    var index = $(evt.target).data('tabindex');
-
-    this.tabFromList = true;
-
-    if (evt.shiftKey) {
-      if (index > 1) {
-        evt.preventDefault();
-        $('[data-tabindex=' + (index - 1) + ']').focus();
-      }
-    } else {
-      if (index === this.$cards.length) {
-        $(selectors$6.cardWrapper, this.$container)
-          .last()
-          .focus();
-      } else {
-        evt.preventDefault();
-        $('[data-tabindex=' + (index + 1) + ']').focus();
-      }
-    }
-  },
-
-  _onCardTabUp: function(evt) {
-    if (evt.keyCode !== 9) return;
-
-    var tabFromList = this.tabFromList || false;
-    this.tabFromList = false;
-
-    if (!evt.shiftKey || tabFromList) return;
-
-    if (
-      $(selectors$6.cardWrapper, this.$container)
-        .last()
-        .is(evt.target)
-    ) {
-      $('[data-tabindex=' + this.$cards.length + ']').focus();
-    }
-  },
-
-  _loadCards: function() {
-    this.trigger('cards_load_start');
-
-    this.$columns = this._addColumns();
-
-    return this._promiseAllCardsReveal().always(
-      function() {
-        this.trigger('cards_load_done');
-      }.bind(this)
-    );
-  },
-
-  _addColumns: function() {
-    var $columns;
-    for (var i = 1; i < this.columnCount; i++) {
-      this.$cardList.append(this.$emptyColumn.clone());
-    }
-
-    $columns = $(selectors$6.cardListColumn, this.$container);
-    $columns.heights = fill(Array(this.columnCount), 0);
-    $columns.lengths = fill(Array(this.columnCount), 0);
-
-    return $columns;
-  },
-
-  _replaceColumns: function() {
-    var $columns = this.$emptyColumn.clone();
-
-    $columns.heights = fill(Array(this.columnCount), 0);
-    $columns.lengths = fill(Array(this.columnCount), 0);
-
-    for (var i = 1; i < this.columnCount; i++) {
-      $columns.push(this.$emptyColumn.clone()[0]);
-    }
-
-    $.each(
-      this.$cards,
-      function(index, card) {
-        this._positionCard($(card), index, $columns);
-      }.bind(this)
-    );
-
-    this.$cardList.html($columns);
-
-    return $columns;
-  },
-
-  _promiseAllCardsReveal: function() {
-    var series = $.Deferred().resolve();
-
-    this.$cards.each(
-      function(index, card) {
-        // Position the card in one of the available columns
-        this._positionCard($(card), index, this.$columns);
-
-        // Check that we have an aligned row and isMobile is false
-        if (!utils.isMobile() && this._isAlignedRow(index + 1)) {
-          var rowNumber = this.$columns.lengths[0];
-          this._matchRowHeights(this.$columns, rowNumber);
-        }
-
-        // We want to check immediately if the card should be revealed, not after
-        // a previous `.then()` in our series has been fulfilled.
-        var promiseRevealReady = this._promiseRevealReady(card);
-
-        // Add the following steps to our series of promises for each card:
-        // 1. Promise the card is ready to be revealed
-        // 2. Reveal the card
-        // 3. Delay 80ms
-        series = series
-          .then(function() {
-            return promiseRevealReady;
-          })
-          .then(this._revealCard.bind(this, card))
-          .then(function() {
-            return $.Deferred(function(defer) {
-              setTimeout(defer.resolve, 80);
-            });
-          });
-      }.bind(this)
-    );
-    return series;
-  },
-
-  _revealCard: function(card) {
-    var $card = $(card);
-
-    this.trigger('card_loaded', [$card[0]]);
-
-    requestAnimationFrame($card.addClass.bind($card, classes$6.cardReveal));
-  },
-
-  // A promise that will be fulfilled when a card is ready to be revealed
-  _promiseRevealReady: function(card) {
-    return $.Deferred(function(defer) {
-      var $card = $(card);
-
-      if (!($('html').hasClass('is-ios') && Shopify.designMode)) {
-        // If we already triggered the animation, then resolve the promise to show
-        // the card. Wrap the position check in requestAnimationFrame to make sure
-        // that the browser is done positioning the element before it reads its
-        // position.
-        requestAnimationFrame(function() {
-          if (utils.isInOrAboveViewport(card)) {
-            return defer.resolve();
-          }
-        });
-
-        // If we haven't triggered the animation, then wait for the animation
-        // event for this card and then resolve the promise to show the card.
-        $card.on('animate_element', onAnimate);
-
-        function onAnimate(evt, element) {
-          if (element !== card) return;
-
-          $card.off('animate_element', onAnimate);
-          defer.resolve();
-        }
-      } else {
-        $(card).addClass(classes$6.cardReveal);
-        defer.resolve();
-      }
+    state.items.forEach(function(item, i) {
+      index = item.key === key$$1 ? i + 1 : index;
     });
-  },
 
-  _positionCard: function($card, index, $columns) {
-    var columnIndex = 0;
-    var cardHeight = $card.outerHeight(true);
-
-    if (this.gridStyle === 'collage') {
-      columnIndex = $columns.heights.indexOf(
-        Math.min.apply(Math, $columns.heights)
-      ); // Default to shortest column
-      var threshold = 150;
-      for (var i = 0; i < $columns.heights.length; i++) {
-        if ($columns.heights[columnIndex] > $columns.heights[i] - threshold) {
-          columnIndex = i;
-          break;
-        }
-      }
-    } else {
-      columnIndex = $columns.lengths.indexOf(
-        Math.min.apply(Math, $columns.lengths)
+    if (index === -1) {
+      return Promise.reject(
+        new Error('Theme Cart: Unable to match line item with provided key')
       );
     }
 
-    $columns.eq(columnIndex).append($card);
+    return index;
+  });
+}
 
-    // Restore the height if it is 0 (needed for matching heights in the
-    // 'aligned' grid)
-    if ($card.outerHeight() === 0 && !utils.isMobile()) {
-      $card.find(selectors$6.cardWrapper).outerHeight(cardHeight);
-    }
+/**
+ * Fetches the line item object
+ * @param {string} key The unique key of the line item
+ * @returns {Promise} Resolves with the line item object (See response of cart/add.js https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#add-to-cart)
+ */
 
-    if (this.gridStyle === 'collage') {
-      $columns.heights[columnIndex] += cardHeight;
-    }
-    $columns.lengths[columnIndex]++;
 
-    $card.find('a').attr('data-tabindex', index + 1);
-  },
+/**
+ * Add a new line item to the cart
+ * @param {number} id The variant's unique ID
+ * @param {object} options Optional values to pass to /cart/add.js
+ * @param {number} options.quantity The quantity of items to be added to the cart
+ * @param {object} options.properties Line item property key/values (https://help.shopify.com/en/themes/liquid/objects/line_item#line_item-properties)
+ * @returns {Promise} Resolves with the line item object (See response of cart/add.js https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#add-to-cart)
+ */
 
-  _matchRowHeights: function($columns, rowNumber) {
-    var maxHeight = 0;
-    var currentCardHeight = 0;
-    var rowSelector = '';
-    var isArticle = false;
 
-    // Construct the selector for the cards in the current row
-    for (var i = 0; i < $columns.length; i++) {
-      rowSelector +=
-        "[data-tabindex='" + ((rowNumber - 1) * $columns.length + i + 1) + "']";
-      if (i < $columns.length - 1) {
-        rowSelector += ', ';
-      }
-    }
-    var $row = $columns.find(rowSelector).parent();
+/**
+ * Add a new line item to the cart from a product form
+ * @param {object} form DOM element which is equal to the <form> node
+ * @returns {Promise} Resolves with the line item object (See response of cart/add.js https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#add-to-cart)
+ */
+function addItemFromForm(form$$1) {
+  form(form$$1);
 
-    for (var j = 0; j < $row.length; j++) {
-      isArticle = $($row[j])
-        .find(selectors$6.cardWrapper)
-        .is('.card--article');
+  var formData = new FormData(form$$1);
+  id(parseInt(formData.get('id'), 10));
 
-      currentCardHeight = $($row[j])
-        .find(selectors$6.cardWrapper)
-        .outerWidth();
-      if ($(document.body).hasClass(classes$6.searchTemplate) && isArticle) {
-        currentCardHeight = $($row[j])
-          .find(selectors$6.cardWrapper)
-          .outerHeight();
-      } else {
-        currentCardHeight =
-          $($row[j])
-            .find(selectors$6.cardWrapper)
-            .outerWidth() +
-          $($row[j])
-            .find(selectors$6.cardInfo)
-            .outerHeight();
-      }
+  return cartAddFromForm(formData);
+}
 
-      if (currentCardHeight > maxHeight) {
-        maxHeight = currentCardHeight;
-      }
-    }
+/**
+ * Changes the quantity and/or properties of an existing line item.
+ * @param {string} key The unique key of the line item (https://help.shopify.com/en/themes/liquid/objects/line_item#line_item-key)
+ * @param {object} options Optional values to pass to /cart/add.js
+ * @param {number} options.quantity The quantity of items to be added to the cart
+ * @param {object} options.properties Line item property key/values (https://help.shopify.com/en/themes/liquid/objects/line_item#line_item-properties)
+ * @returns {Promise} Resolves with the state object of the cart (https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#get-cart)
+ */
+function updateItem(key$$1, options$$1) {
+  key(key$$1);
+  options(options$$1);
 
-    $row.find(selectors$6.cardWrapper).outerHeight(maxHeight);
-  },
+  return getItemIndex(key$$1).then(function(line) {
+    return cartChange(line, options$$1);
+  });
+}
 
-  _isAlignedRow: function(index) {
-    // Check if the gridStyle is 'grid', and if we are at the end of a row or
-    // at the last card
-    return (
-      this.gridStyle === 'grid' &&
-      (index % this.desktopColumnCount === 0 || index === this.$cards.length)
-    );
-  }
-};
+/**
+ * Removes a line item from the cart
+ * @param {string} key The unique key of the line item (https://help.shopify.com/en/themes/liquid/objects/line_item#line_item-key)
+ * @returns {Promise} Resolves with the state object of the cart (https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#get-cart)
+ */
 
-/*
 
-Blog Template Section
---------------------------------------------------------------------------------
-Creates a staggered card grid for the blog template.
+/**
+ * Sets all quantities of all line items in the cart to zero. This does not remove cart attributes nor the cart note.
+ * @returns {Promise} Resolves with the state object of the cart (https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#get-cart)
+ */
 
-*/
 
-// Extensions
-// Libs
-sections.register('blog-template', {
-  onLoad: function() {
-    this.extend(cardManager);
-  }
+/**
+ * Gets all cart attributes
+ * @returns {Promise} Resolves with the cart attributes object
+ */
+
+
+/**
+ * Sets all cart attributes
+ * @returns {Promise} Resolves with the cart state object
+ */
+
+
+/**
+ * Clears all cart attributes
+ * @returns {Promise} Resolves with the cart state object
+ */
+
+
+/**
+ * Gets cart note
+ * @returns {Promise} Resolves with the cart note string
+ */
+
+
+/**
+ * Sets cart note
+ * @returns {Promise} Resolves with the cart state object
+ */
+function updateNote(note) {
+  return cartUpdate({ note: note });
+}
+
+/**
+ * Clears cart note
+ * @returns {Promise} Resolves with the cart state object
+ */
+function clearNote() {
+  return cartUpdate({ note: '' });
+}
+
+/**
+ * Get estimated shipping rates.
+ * @returns {Promise} Resolves with response of /cart/shipping_rates.json (https://help.shopify.com/en/themes/development/getting-started/using-ajax-api#get-shipping-rates)
+ */
+
+function createCommonjsModule(fn, module) {
+	return module = { exports: {} }, fn(module, module.exports), module.exports;
+}
+
+var currency_cjs = createCommonjsModule(function (module, exports) {
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
 });
-
-var cart = {
-  isUpdating: false,
-
-  getCart: function() {
-    return $.getJSON('/cart.js');
-  },
-
-  on: function(event, cb) {
-    $(this).on(event, cb);
-  },
-
-  trigger: function(event, data) {
-    $(this).triggerHandler(event, data);
-  },
-
-  updateNote: function(note) {
-    return this._promiseChange({
-      url: '/cart/update.js',
-      dataType: 'json',
-      data: {
-        note: note || ''
-      }
-    });
-  },
-
-  addItem: function(id, quantity) {
-    return this._promiseChange({
-      url: '/cart/add.js',
-      dataType: 'json',
-      data: {
-        id: id,
-        quantity: typeof quantity === 'undefined' ? 1 : quantity
-      }
-    });
-  },
-
-  addItemFromForm: function(data) {
-    return this._promiseChange({
-      url: '/cart/add.js',
-      dataType: 'json',
-      processData: false,
-      contentType: false,
-      type: 'POST',
-      data: data
-    });
-  },
-
-  removeItem: function(lineNumber) {
-    return this._promiseChange({
-      url: '/cart/change.js',
-      dataType: 'json',
-      data: {
-        line: lineNumber,
-        quantity: 0
-      }
-    });
-  },
-
-  changeItem: function(lineNumber, quantity) {
-    return this._promiseChange({
-      url: '/cart/change.js',
-      dataType: 'json',
-      data: {
-        line: lineNumber,
-        quantity: quantity
-      }
-    });
-  },
-
-  saveLocalState: function(state) {
-    if (utils.isLocalStorageSupported()) {
-      localStorage.shopify_cart_state = JSON.stringify(state); // eslint-disable-line camelcase
-    }
-
-    return state;
-  },
-
-  getLocalState: function() {
-    // eslint-disable-line consistent-return
-    if (utils.isLocalStorageSupported()) {
-      return JSON.parse(localStorage.shopify_cart_state || '');
-    }
-  },
-
-  _promiseChange: function(parameters) {
-    var promiseRequest = $.ajax(parameters);
-
-    this.isUpdating = true;
-
-    // If offline, provide a rejected promise so that an error is thrown.
-    if (navigator && !theme.isOnline) {
-      promiseRequest = $.Deferred().reject();
-    }
-
-    return (
-      promiseRequest
-        // Some cart API requests don't return the cart object. If there is no
-        // cart object then get one before proceeding.
-        .then(
-          function(state) {
-            if (typeof state.token === 'undefined') {
-              return this.getCart();
-            } else {
-              return state;
-            }
-          }.bind(this)
-        )
-        .then(this.saveLocalState)
-        .then(this._triggerChangeEvent.bind(this))
-        .catch(this._triggerErrorEvent.bind(this))
-        .always(
-          function() {
-            this.isUpdating = false;
-          }.bind(this)
-        )
-    );
-  },
-
-  _triggerChangeEvent: function(state) {
-    this.trigger('change', state);
-    return state;
-  },
-
-  _triggerErrorEvent: function(error) {
-    this.trigger('error', error);
-
-    // We want to throw an error event, but also let any future 'catch' down
-    // the promise chain to catch this error, so we re-throw the error.
-    throw error;
-  }
-};
-
+exports.formatMoney = formatMoney;
 /**
  * Currency Helpers
  * -----------------------------------------------------------------------------
@@ -2255,6175 +562,5168 @@ var cart = {
  * Current contents
  * - formatMoney - Takes an amount in cents and returns it as a formatted dollar value.
  *
- * Alternatives
- * - Accounting.js - http://openexchangerates.github.io/accounting.js/
- *
  */
 
-var moneyFormat = '${{amount}}'; // eslint-disable-line camelcase
-
-var currency = {
-  formatMoney: function(cents, format) {
-    if (typeof cents === 'string') {
-      cents = cents.replace('.', '');
-    }
-    var value = '';
-    var placeholderRegex = /\{\{\s*(\w+)\s*\}\}/;
-    var formatString = format || moneyFormat;
-
-    function formatWithDelimiters(number, precision, thousands, decimal) {
-      precision = defaultTo(precision, 2);
-      thousands = defaultTo(thousands, ',');
-      decimal = defaultTo(decimal, '.');
-
-      if (isNaN(number) || number === null) {
-        return 0;
-      }
-
-      number = (number / 100.0).toFixed(precision);
-
-      var parts = number.split('.');
-      var dollarsAmount = parts[0].replace(
-        /(\d)(?=(\d\d\d)+(?!\d))/g,
-        '$1' + thousands
-      );
-      var centsAmount = parts[1] ? decimal + parts[1] : '';
-
-      return dollarsAmount + centsAmount;
-    }
-
-    switch (formatString.match(placeholderRegex)[1]) {
-      case 'amount':
-        value = formatWithDelimiters(cents, 2);
-        break;
-      case 'amount_no_decimals':
-        value = formatWithDelimiters(cents, 0);
-        break;
-      case 'amount_with_comma_separator':
-        value = formatWithDelimiters(cents, 2, '.', ',');
-        break;
-      case 'amount_no_decimals_with_comma_separator':
-        value = formatWithDelimiters(cents, 0, '.', ',');
-        break;
-      case 'amount_no_decimals_with_space_separator':
-        value = formatWithDelimiters(cents, 0, ' ');
-        break;
-      case 'amount_with_apostrophe_separator':
-        value = formatWithDelimiters(cents, 2, "'");
-        break;
-    }
-
-    return formatString.replace(placeholderRegex, value);
-  }
-};
+var moneyFormat = '${{amount}}';
 
 /**
- * Image Helper Functions
- * -----------------------------------------------------------------------------
- * A collection of functions that help with basic image operations.
- *
+ * Format money values based on your shop currency settings
+ * @param  {Number|string} cents - value in cents or dollar amount e.g. 300 cents
+ * or 3.00 dollars
+ * @param  {String} format - shop money_format setting
+ * @return {String} value - formatted value
  */
-
-var images = {
-  /**
-   * Preloads an image in memory and uses the browsers cache to store it until needed.
-   *
-   * @param {Array} images - A list of image urls
-   * @param {String} size - A shopify image size attribute
-   */
-
-  preload: function(images, size) {
-    if (typeof images === 'string') {
-      images = [images];
-    }
-
-    for (var i = 0; i < images.length; i++) {
-      var image = images[i];
-
-      this.loadImage(this.getSizedImageUrl(image, size));
-    }
-  },
-
-  /**
-   * Loads and caches an image in the browsers cache.
-   * @param {string} path - An image url
-   */
-  loadImage: function(path) {
-    new Image().src = path;
-  },
-
-  /**
-   * Swaps the src of an image for another OR returns the imageURL to the callback function
-   * @param image
-   * @param element
-   * @param callback
-   */
-  switchImage: function(image, element, callback) {
-    var size = this.imageSize(element.src);
-    var imageUrl = this.getSizedImageUrl(image.src, size);
-
-    if (callback) {
-      callback(imageUrl, image, element); // eslint-disable-line callback-return
-    } else {
-      element.src = imageUrl;
-    }
-  },
-
-  /**
-   * +++ Useful
-   * Find the Shopify image attribute size
-   *
-   * @param {string} src
-   * @returns {null}
-   */
-  imageSize: function(src) {
-    src = src || '';
-
-    var match = src.match(
-      /.+_((?:pico|icon|thumb|small|compact|medium|large|grande)|\d{1,4}x\d{0,4}|x\d{1,4})[_\\.@]/
-    );
-
-    if (match !== null) {
-      return match[1];
-    }
-
-    return null;
-  },
-
-  /**
-   * +++ Useful
-   * Adds a Shopify size attribute to a URL
-   *
-   * @param src
-   * @param size
-   * @returns {*}
-   */
-  getSizedImageUrl: function(src, size) {
-    if (size === null) {
-      return src;
-    }
-
-    if (size === 'master') {
-      return this.removeProtocol(src);
-    }
-
-    var match = src.match(
-      /\.(jpg|jpeg|gif|png|bmp|bitmap|tiff|tif)(\?v=\d+)?$/i
-    );
-
-    if (match !== null) {
-      var prefix = src.split(match[0]);
-      var suffix = match[0];
-
-      return this.removeProtocol(prefix[0] + '_' + size + suffix);
-    }
-
-    return null;
-  },
-
-  removeProtocol: function(path) {
-    return path.replace(/http(s)?:/, '');
+function formatMoney(cents, format) {
+  if (typeof cents === 'string') {
+    cents = cents.replace('.', '');
   }
+  var value = '';
+  var placeholderRegex = /\{\{\s*(\w+)\s*\}\}/;
+  var formatString = format || moneyFormat;
+
+  function formatWithDelimiters(number) {
+    var precision = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 2;
+    var thousands = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : ',';
+    var decimal = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : '.';
+
+    if (isNaN(number) || number == null) {
+      return 0;
+    }
+
+    number = (number / 100.0).toFixed(precision);
+
+    var parts = number.split('.');
+    var dollarsAmount = parts[0].replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1' + thousands);
+    var centsAmount = parts[1] ? decimal + parts[1] : '';
+
+    return dollarsAmount + centsAmount;
+  }
+
+  switch (formatString.match(placeholderRegex)[1]) {
+    case 'amount':
+      value = formatWithDelimiters(cents, 2);
+      break;
+    case 'amount_no_decimals':
+      value = formatWithDelimiters(cents, 0);
+      break;
+    case 'amount_with_comma_separator':
+      value = formatWithDelimiters(cents, 2, '.', ',');
+      break;
+    case 'amount_no_decimals_with_comma_separator':
+      value = formatWithDelimiters(cents, 0, '.', ',');
+      break;
+  }
+
+  return formatString.replace(placeholderRegex, value);
+}
+});
+
+var formatMoney = currency_cjs.formatMoney;
+
+const selectors$1 = {
+  cartItemsWrapper: '[data-cart-items]',
+  cartItem: 'data-cart-item',
+  quantityInput: '[data-cart-item-quantity]',
+  remove: '[data-remove]',
+  cartCountBubble: '[data-cart-count-bubble]',
+  cartCount: '[data-cart-count]',
+  cartNote: '[data-cart-note]',
+  cartPrice: '[data-cart-price]',
+  priceLiveRegion: '[data-price-live-region]',
+  checkoutButton: '[data-checkout-button]',
+  cartItemError: '[data-cart-item-error]',
+  closeButton: '[data-cart-close]',
+  emptyText: '[data-cart-empty-text]',
+  discounts: '[data-discounts]',
 };
 
-/*
-
-Ajax Cart Extension
---------------------------------------------------------------------------------
-Manages the AJAX powered cart functionality
-
-
-Events
-------------
-
-Name: cart_update_start
-Description: Fired before the cart DOM updates
-Payload: { object } Cart state object
-
-Name: cart_update_done
-Description: Fired after the cart DOM updates
-Payload: { object } Cart state object
-
-Name: cart_error
-Description: Fired when there is an with the last cart request
-Payload: { object } Error object
-
-Name: cart_item_quantity_error
-Description: Fired when there is problem with the requested item quanitity
-Payload: { object } Item with valid quantity
-
-Name: cart_storage_state_change
-Description: Fired when the cart state changes in another active tab
-Payload: { object } Cart state object
-
-Name: cart_item_quantity_change
-Description: Fired when the user selects a new quantity in the item input
-Payload: { string } Item ID
-Payload: { number } Quantity
-
-Name: cart_item_remove
-Description: Fired when the user selects to remove an item
-Payload: { string } Item ID
-
-Name: cart_note_change
-Description: Fired when the user changes the value in the note textarea
-Payload: { string } Note value
-
-Name: cart_submit
-Description: Fired when the user submits the cart form and proceeds to the checkout
-Payload: none
-
-*/
-
-var data = {
-  itemId: 'data-cart-item-id',
-  itemLineNumber: 'data-cart-item-line-number'
+const classes$1 = {
+  hidden: 'hidden',
+  isEmpty: 'is-empty',
+  cookiesDisabled: 'cookies-disabled',
+  hasError: 'has-error',
 };
 
-var selectors$8 = {
-  ajaxCart: '.cart-drawer',
-  itemList: '[data-cart-item-list]',
-  item: '[data-cart-item]',
-  itemId: '[data-cart-item-id]',
-  itemHref: '[data-cart-item-href]',
-  itemImage: '[data-cart-item-image]',
-  itemBackgroundImage: '[data-cart-item-background-image]',
-  itemTitle: '[data-cart-item-title]',
-  itemVariantTitle: '[data-cart-item-variant-title]',
-  itemDetailsList: '[data-cart-item-details-list]',
-  itemProperty: '[data-cart-item-property]',
-  itemSellingPlanName: '[data-cart-item-selling-plan-name]',
-  itemDiscountList: '[data-cart-item-discount-list]',
-  itemDiscount: '[data-cart-item-discount]',
-  itemDiscountTitle: '[data-cart-item-discount-title]',
-  itemDiscountAmount: '[data-cart-item-discount-amount]',
-  itemLabelQuantity: '[data-cart-item-label-quantity]',
-  itemInputQuantity: '[data-cart-item-input-quantity]',
-  itemDelete: '[data-cart-item-delete]',
-  itemPriceContainer: '[data-cart-item-price-container]',
-  itemLinePriceContainer: '[data-cart-item-line-price-container]',
-  itemMessage: '[data-item-message]',
-  cartDiscountContainer: '[data-cart-discount-container]',
-  cartDiscount: '[data-cart-discount]',
-  cartDiscountTitle: '[data-cart-discount-title]',
-  cartDiscountAmount: '[data-cart-discount-amount]',
-  cartNoteContainer: '[data-cart-note-container]',
-  cartNoteInput: '[data-cart-note]',
-  cartMessage: '[data-cart-message]',
-  cartSubtotal: '[data-cart-subtotal]',
-  cartSubmit: '[data-cart-submit]'
-};
+class Cart {
+  constructor(cartElement) {
+    this.elements = {
+      cart: cartElement,
+    };
+  }
 
-var classes$8 = {
-  cartTemplate: 'ajax-cart__template',
-  cartItemRemove: 'ajax-cart__item--remove',
-  cartError: 'ajax-cart--error',
-  visuallyHidden: 'visually-hidden',
-  cartDiscountActive: 'ajax-cart__discount-container--active',
-  btnLoaderActive: 'btn--loader-active'
-};
+  init() {
+    if (!cookiesEnabled()) {
+      this.elements.cart.classList.add(classes$1.cookiesDisabled);
+      return;
+    }
 
-var ajaxCart = {
-  init: function() {
-    this.$ajaxCart = $(selectors$8.ajaxCart, this.$container);
-    this.$itemTemplate = $(selectors$8.item, this.$container)
-      .first()
-      .clone();
-    this.$propertyTemplate = $(selectors$8.itemProperty, this.$container)
-      .first()
-      .clone();
-    this.$sellingPlanNameTemplate = $(
-      selectors$8.itemSellingPlanName,
-      this.$container
-    )
-      .first()
-      .clone();
-    this.$discountTemplate = $(selectors$8.itemDiscount, this.$container)
-      .first()
-      .clone();
-    this.$cartDiscountTemplate = $(selectors$8.cartDiscount, this.$container)
-      .first()
-      .clone();
-
-    cart.on('quantity', this._onQuantityError.bind(this));
-    cart.on(
-      'change',
-      function(event, state) {
-        this.update(state);
-      }.bind(this)
+    Object.assign(
+      this.elements,
+      this.getCartElements(),
+      this.getItemElements()
     );
 
-    this.on(
-      'input',
-      selectors$8.itemInputQuantity,
-      debounce(this._onItemQuantityChange.bind(this), 500)
-    );
-    this.on(
-      'blur',
-      selectors$8.itemInputQuantity,
-      this._onItemQuantityEmptyBlur.bind(this)
-    );
-    this.on('focus', selectors$8.itemInputQuantity, this._highlightText);
-    this.on('click', selectors$8.itemDelete, this._onItemDelete.bind(this));
-    this.on('change', selectors$8.cartNoteInput, this._onNoteChange.bind(this));
-    this.on('submit', this._onSubmit.bind(this));
+    this.bindContextOfThis();
 
-    this.window().on('storage', this._onStorageStateChange.bind(this));
-  },
+    this.debouncedOnCartItemInput = debounce((event, lineItem) => {
+      this.onCartItemInput(event, lineItem);
+    }, 300);
 
-  refresh: function() {
-    cart.getCart().then(this.update.bind(this));
-  },
+    this.addCartEvents();
+    this.addItemEvents();
+  }
 
-  update: function(state) {
-    this.trigger('cart_update_start', [state]);
+  bindContextOfThis() {
+    this.onCartItemInput = this.onCartItemInput.bind(this);
+    this.onCartItemClick = this.onCartItemClick.bind(this);
+    this.updateCartNote = this.updateCartNote.bind(this);
+  }
 
-    var $cart = this._createCart(state);
-    morphdom(this.$container[0], $cart[0]);
+  getItemElements() {
+    return {
+      cartItems: this.elements.cart.querySelectorAll(`[${selectors$1.cartItem}]`),
+    };
+  }
 
-    this.trigger('cart_update_done', [state]);
-  },
+  getCartElements() {
+    return {
+      cartNote: this.elements.cart.querySelector(selectors$1.cartNote),
+    };
+  }
 
-  _onError: function(error) {
-    this.trigger('cart_error', [error]);
+  addItemEvents() {
+    this.elements.cartItems.forEach((cartItem) => {
+      cartItem.addEventListener('change', (event) => {
+        this.debouncedOnCartItemInput(event, event.currentTarget);
+      });
+      cartItem.addEventListener('click', this.onCartItemClick);
+    });
+  }
 
-    this.$container.addClass(classes$8.cartError);
+  addCartEvents() {
+    if (this.elements.cartNote) {
+      this.elements.cartNote.addEventListener('input', this.updateCartNote);
+    }
+  }
 
-    $(selectors$8.item, this.$container).removeClass(classes$8.cartItemRemove);
-    $(selectors$8.cartMessage, this.$container).text(theme.strings.cartError);
-  },
+  onCartItemInput(event, lineItem) {
+    event.preventDefault();
+    const quantityInput = lineItem.querySelector(selectors$1.quantityInput);
 
-  _onQuantityError: function(event, item) {
-    this.trigger('cart_item_quantity_error', [item]);
+    if (event.target === quantityInput) {
+      return this.updateQuantity(event, lineItem);
+    }
 
-    this.$container.addClass(classes$8.cartError);
+    return false;
+  }
 
-    var quantityError = theme.strings.cartQuantityError
+  onCartItemClick(event) {
+    const remove = event.currentTarget.querySelector(selectors$1.remove);
+
+    if (event.target === remove) {
+      event.preventDefault();
+      event.target.disabled = true;
+      this.removeItem(event);
+    }
+  }
+
+  updateQuantity(event, lineItem) {
+    const key = lineItem.dataset.cartItem;
+    const productId = lineItem.dataset.cartItemProductId;
+    const [variantId] = key.split(':');
+    const quantityInput = event.target;
+    const quantityInputValue = quantityInput.value || 1;
+
+    const newQuantity = parseInt(quantityInputValue, 10);
+    this.removeLineItemError(lineItem);
+
+    return updateItem(key, { quantity: newQuantity })
+      .then((state) => {
+        this.renderCart(state, productId);
+        theme.cartQuantity.updateQuantityInputElements(key, newQuantity);
+
+        if (!state.item_count) {
+          this.renderEmptyCart();
+          return false;
+        }
+
+        return this.renderCartItems(state);
+      })
+      .then((state) => {
+        if (!state) return;
+
+        const updatedItem = state.items.find((item) => item.key === key);
+
+        const totalQuantity = state.items.reduce((total, currentItem) => {
+          return currentItem.id === Number(variantId)
+            ? total + currentItem.quantity
+            : total;
+        }, 0);
+
+        const currentLineItem = this.elements.cart.querySelector(
+          `[${selectors$1.cartItem}="${key}"]`
+        );
+
+        if (currentLineItem) {
+          currentLineItem.querySelector(selectors$1.quantityInput).focus();
+        }
+
+        if (newQuantity <= totalQuantity) return;
+
+        const lineItemError = currentLineItem.querySelector(
+          selectors$1.cartItemError
+        );
+
+        this.updateLineItemError(lineItemError, updatedItem);
+      });
+  }
+
+  updateCartNote() {
+    const note = this.elements.cartNote.value;
+
+    if (note) {
+      updateNote(note);
+      return;
+    }
+
+    clearNote();
+  }
+
+  removeItem(event) {
+    const lineItem = event.currentTarget;
+    const key = lineItem.dataset.cartItem;
+    const productId = lineItem.dataset.cartItemProductId;
+
+    return updateItem(key, { quantity: 0 }).then((state) => {
+      this.renderCart(state, productId);
+      theme.cartQuantity.updateQuantityInputElements(key, 0);
+
+      if (!state.item_count) {
+        this.renderEmptyCart();
+        return;
+      }
+
+      this.renderCartItems();
+
+      this.elements.closeButton =
+        this.elements.closeButton ||
+        this.elements.cart.querySelector(selectors$1.closeButton);
+
+      this.elements.closeButton.focus();
+    });
+  }
+
+  updateLineItemError(lineItemError, item) {
+    let errorMessage = theme.strings.quantityError;
+
+    errorMessage = errorMessage
       .replace('[quantity]', item.quantity)
       .replace('[title]', item.title);
 
-    var $itemMessageElement = $(
-      selectors$8.itemMessage,
-      $('[' + data.itemId + '="' + item.key + '"]')
-    );
-
-    $itemMessageElement.removeAttr('aria-hidden');
-    $itemMessageElement.html(quantityError);
-  },
-
-  _createCart: function(state) {
-    var $container = this.$container.clone();
-
-    $container.removeClass(classes$8.cartError);
-    $(selectors$8.cartMessage, $container).text('');
-
-    $(selectors$8.item, $container)
-      .not(selectors$8.cartNoteContainer)
-      .remove();
-
-    $(selectors$8.itemList, $container).prepend(this._createItemList(state));
-
-    $(selectors$8.cartNoteInput, $container).val(state.note);
-
-    $(selectors$8.cartDiscountContainer, $container).toggleClass(
-      classes$8.cartDiscountActive,
-      state.total_discount !== 0
-    );
-
-    $(selectors$8.cartDiscountContainer, $container).html(
-      this._createCartDiscountList(state)
-    );
-
-    $(selectors$8.cartSubtotal, $container).html(
-      currency.formatMoney(state.total_price, theme.moneyFormat)
-    );
-
-    $(selectors$8.cartSubmit, $container).attr(
-      'disabled',
-      state.items.length === 0
-    );
-
-    return $container;
-  },
-
-  _createItemList: function(state) {
-    return $.map(
-      state.items,
-      function(item, index) {
-        var $item = this.$itemTemplate
-          .clone()
-          .removeClass(classes$8.cartTemplate);
-        var detailsList = this._createDetailsList(item);
-        var discountList = this._createDiscountList(item);
-        var itemPrice = this._createItemPrice(item);
-        var itemLinePrice = this._createItemTotalPrice(item);
-
-        $item
-          .find(selectors$8.itemId)
-          .addBack(selectors$8.itemId)
-          .attr(data.itemId, item.key)
-          .attr(data.itemLineNumber, (index += 1));
-
-        $(selectors$8.itemHref, $item).attr('href', item.url);
-
-        $(selectors$8.itemImage, $item)
-          .attr(
-            'src',
-            item.image ? images.getSizedImageUrl(item.image, 'medium') : ''
-          )
-          .toggleClass('hide', typeof item.image !== 'string');
-
-        $(selectors$8.itemBackgroundImage, $item).css(
-          'background-image',
-          item.image
-            ? 'url(' + images.getSizedImageUrl(item.image, 'medium') + ')'
-            : 'none'
-        );
-
-        $(selectors$8.itemTitle, $item).text(item.product_title);
-
-        $(selectors$8.itemVariantTitle, $item).text(item.variant_title);
-
-        $(selectors$8.itemPriceContainer, $item).html(itemPrice);
-
-        $(selectors$8.itemLinePriceContainer, $item).html(itemLinePrice);
-
-        $(selectors$8.itemLabelQuantity, $item).attr(
-          'for',
-          'quantity_' + item.key
-        );
-
-        $(selectors$8.itemInputQuantity, $item)
-          .attr('id', 'quantity_' + item.key)
-          .val(item.quantity);
-
-        $(selectors$8.itemDetailsList, $item).html(detailsList);
-
-        $(selectors$8.itemDiscountList, $item).html(discountList);
-
-        return $item[0];
-      }.bind(this)
-    );
-  },
-
-  _createItemPrice: function(item) {
-    var itemPrice = '';
-
-    itemPrice += this._createItemProductPrice(
-      item.original_price,
-      item.final_price
-    );
-
-    if (item.unit_price_measurement) {
-      itemPrice += this._createItemUnitPrice(item);
-    }
-
-    return itemPrice;
-  },
-
-  _createItemTotalPrice: function(item) {
-    var itemPrice = '';
-
-    itemPrice += this._createItemProductPrice(
-      item.original_line_price,
-      item.final_line_price
-    );
-
-    return itemPrice;
-  },
-
-  _createItemProductPrice: function(original_price, final_price) {
-    var itemPrice = '';
-
-    if (original_price !== final_price) {
-      itemPrice +=
-        '<span class="visually-hidden">' +
-        theme.strings.regularPrice +
-        '</span>' +
-        '<del class="cart-item__original-price">' +
-        currency.formatMoney(original_price, theme.moneyFormat) +
-        '</del>' +
-        '<span class="visually-hidden">' +
-        theme.strings.salePrice +
-        '</span>' +
-        '<span class="order-discount cart-item__price">' +
-        currency.formatMoney(final_price, theme.moneyFormat) +
-        '</span>';
-    } else {
-      itemPrice +=
-        '<span class="cart-item__original-price cart-item__price">' +
-        currency.formatMoney(original_price, theme.moneyFormat) +
-        '</span>';
-    }
-
-    return itemPrice;
-  },
-
-  _createItemUnitPrice: function(item) {
-    return (
-      '<span class="product-price-unit">' +
-      '<span class="visually-hidden">' +
-      theme.strings.unitPrice +
-      '</span>' +
-      '<span>' +
-      currency.formatMoney(item.unit_price, theme.moneyFormat) +
-      '</span>' +
-      '<span aria-hidden="true">/</span>' +
-      '<span class="visually-hidden">&nbsp;' +
-      theme.strings.unitPriceSeparator +
-      '&nbsp;</span>' +
-      '<span>' +
-      (item.unit_price_measurement.reference_value !== 1
-        ? item.unit_price_measurement.reference_value
-        : '') +
-      item.unit_price_measurement.reference_unit +
-      '</span>' +
-      '</span>'
-    );
-  },
-
-  _createDetailsList: function(item) {
-    var productDetailsHTML = [];
-
-    if (item.selling_plan_allocation) {
-      productDetailsHTML = productDetailsHTML.concat(
-        this._getSellingPlanName(item.selling_plan_allocation.selling_plan.name)
-      );
-    }
-
-    if (item.properties !== null && Object.keys(item.properties).length !== 0) {
-      productDetailsHTML = productDetailsHTML.concat(
-        this._getPropertyList(item.properties)
-      );
-    }
-
-    return productDetailsHTML;
-  },
-
-  _getSellingPlanName: function(selling_plan_name) {
-    var $sellingPlanNameElement = this.$sellingPlanNameTemplate.clone();
-
-    $sellingPlanNameElement
-      .text(selling_plan_name)
-      .removeClass(classes$8.visuallyHidden);
-
-    return $sellingPlanNameElement[0];
-  },
-
-  _getPropertyList: function(properties) {
-    return $.map(
-      properties,
-      function(value, key) {
-        var $property = this.$propertyTemplate
-          .clone()
-          .removeClass(classes$8.cartTemplate);
-
-        // Line item properties prefixed with an underscore are not to be displayed
-        if (key.charAt(0) === '_') return;
-
-        // Line item properties with no value are not to be displayed
-        if (value === '') return;
-
-        if (value.indexOf('/uploads/') === -1) {
-          $property.text(key + ': ' + value);
-        } else {
-          $property.html(
-            key + ': <a href="' + value + '">' + value.split('/').pop() + '</a>'
-          );
-        }
-
-        return $property[0];
-      }.bind(this)
-    );
-  },
-
-  _createDiscountList: function(item) {
-    return $.map(
-      item.line_level_discount_allocations,
-      function(discount) {
-        var $discount = this.$discountTemplate
-          .clone()
-          .removeClass(classes$8.cartTemplate);
-        $discount
-          .find(selectors$8.itemDiscountTitle)
-          .text(discount.discount_application.title);
-        $discount
-          .find(selectors$8.itemDiscountAmount)
-          .html(currency.formatMoney(discount.amount, theme.moneyFormat));
-        return $discount[0];
-      }.bind(this)
-    );
-  },
-
-  _createCartDiscountList: function(cart$$1) {
-    return $.map(
-      cart$$1.cart_level_discount_applications,
-      function(discount) {
-        var $discount = this.$cartDiscountTemplate
-          .clone()
-          .removeClass(classes$8.cartTemplate);
-        $discount.find(selectors$8.cartDiscountTitle).text(discount.title);
-        $discount
-          .find(selectors$8.cartDiscountAmount)
-          .html(
-            currency.formatMoney(
-              discount.total_allocated_amount,
-              theme.moneyFormat
-            )
-          );
-        return $discount[0];
-      }.bind(this)
-    );
-  },
-
-  _onStorageStateChange: function(evt) {
-    if (evt.key !== 'shopify_cart_state') return;
-
-    var state = cart.getLocalState();
-
-    this.trigger('cart_storage_state_change', [state]);
-    this.update(cart.getLocalState());
-  },
-
-  _onItemQuantityChange: function(evt) {
-    var $input = $(evt.target);
-    var id = $input.closest(selectors$8.item).attr(data.itemId);
-    var lineItemNumber = parseInt(
-      $input.closest(selectors$8.item).attr(data.itemLineNumber)
-    );
-    var quantity = $input.val();
-
-    // Don't update the cart when a input is empty. Also make sure an input
-    // does not remain empty by checking blur event.
-    if (quantity === '') return;
-
-    this.trigger('cart_item_quantity_change', [id, quantity]);
-
-    cart.changeItem(lineItemNumber, quantity).catch(this._onError.bind(this));
-  },
-
-  _onItemQuantityEmptyBlur: function(evt) {
-    var $input = $(evt.target);
-    var value = $input.val();
-
-    if (value !== '') return;
-
-    this.refresh();
-  },
-
-  _onItemDelete: function(evt) {
-    evt.preventDefault();
-
-    var $deleteButton = $(evt.target);
-    var $items = $(selectors$8.item, this.$container);
-    var $item = $deleteButton.closest(selectors$8.item);
-    var $note = $(selectors$8.cartNoteContainer, this.$container);
-    var id = $item.attr(data.itemId);
-    var lineItemNumber = parseInt($item.attr(data.itemLineNumber));
-
-    this.trigger('cart_item_remove', [id]);
-
-    if ($items.length === 2 && $items.last().is($note)) {
-      $note.addClass(classes$8.cartItemRemove);
-
-      utils
-        .promiseTransitionEnd($(selectors$8.itemList, this.$container))
-        .then(function() {
-          $note.removeClass(classes$8.cartItemRemove);
-        });
-    }
-
-    $item.addClass(classes$8.cartItemRemove);
-
-    utils.promiseAnimationEnd($item).then(
-      function() {
-        cart.removeItem(lineItemNumber).catch(this._onError.bind(this));
-      }.bind(this)
-    );
-  },
-
-  _onNoteChange: function(evt) {
-    var value = $(evt.target).val();
-
-    this.trigger('cart_note_change', [value]);
-
-    cart.updateNote(value).catch(this._onError.bind(this));
-  },
-
-  _onSubmit: function(evt) {
-    if (cart.isUpdating) {
-      evt.preventDefault();
-    } else {
-      $(selectors$8.cartSubmit, this.$container).addClass(
-        classes$8.btnLoaderActive
-      );
-      this.trigger('cart_submit');
-    }
-  },
-
-  _highlightText: function(evt) {
-    $(evt.target).select();
+    lineItemError.innerHTML = errorMessage;
+    lineItemError.classList.add(classes$1.hasError);
   }
+
+  removeLineItemError(lineItem) {
+    const lineItemError = lineItem.querySelector(selectors$1.cartItemError);
+    lineItemError.classList.remove(classes$1.hasError);
+    lineItemError.textContent = '';
+  }
+
+  changeCheckoutButtonState(shouldDisable) {
+    this.elements.checkoutButton =
+      this.elements.checkoutButton ||
+      this.elements.cart.querySelector(selectors$1.checkoutButton);
+
+    this.elements.checkoutButton.disabled = shouldDisable;
+  }
+
+  onCartUpdated(updatedItem) {
+    this.renderCartItems();
+
+    return getState().then((state) => {
+      this.renderCart(state, updatedItem);
+    });
+  }
+
+  renderCartItems(state) {
+    return fetch(`${theme.rootUrl}?section_id=cart-items`)
+      .then((response) => {
+        return response.text();
+      })
+      .then((html) => {
+        this.elements.cartItemsWrapper =
+          this.elements.cartItemsWrapper ||
+          this.elements.cart.querySelector(selectors$1.cartItemsWrapper);
+
+        this.elements.cartItemsWrapper.innerHTML = html;
+        Object.assign(this.elements, this.getItemElements());
+        this.addItemEvents();
+        return state;
+      });
+  }
+
+  renderCart(state, updatedItem) {
+    this.renderSubtotalPrice(state.total_price);
+    this.renderCartCountBubble(state.item_count);
+    this.renderPriceLiveRegion(state);
+    this.renderCartLevelDiscounts();
+    theme.cartQuantity.updateLocalCartState(state, updatedItem);
+
+    if (state.item_count) {
+      this.elements.cart.classList.remove(classes$1.isEmpty);
+      this.changeCheckoutButtonState(false);
+    }
+  }
+
+  renderEmptyCart() {
+    this.elements.cart.classList.add(classes$1.isEmpty);
+    this.changeCheckoutButtonState(true);
+
+    this.elements.cartEmptyText =
+      this.elements.cartEmptyText ||
+      this.elements.cart.querySelector(selectors$1.emptyText);
+
+    this.elements.cartEmptyText.setAttribute('tabindex', '-1');
+    this.elements.cartEmptyText.focus();
+  }
+
+  renderCartLevelDiscounts() {
+    return fetch(`${theme.rootUrl}?section_id=cart-discounts`)
+      .then((response) => {
+        return response.text();
+      })
+      .then((html) => {
+        this.elements.discounts =
+          this.elements.discounts ||
+          this.elements.cart.querySelector(selectors$1.discounts);
+
+        this.elements.discounts.innerHTML = html;
+      });
+  }
+
+  renderSubtotalPrice(subtotal) {
+    const formattedCartPrice = formatMoney(subtotal, theme.moneyFormat);
+
+    this.elements.cartPrice =
+      this.elements.cartPrice ||
+      document.body.querySelectorAll(selectors$1.cartPrice);
+
+    this.elements.cartPrice.forEach((cartPrice) => {
+      cartPrice.innerHTML = formattedCartPrice;
+    });
+  }
+
+  renderCartCountBubble(itemCount) {
+    const cartCountBubbles = document.querySelectorAll(
+      selectors$1.cartCountBubble
+    );
+    const cartCounts = document.querySelectorAll(selectors$1.cartCount);
+
+    cartCounts.forEach(
+      (cartCount) => (cartCount.innerText = itemCount > 99 ? '99+' : itemCount)
+    );
+    cartCountBubbles.forEach((countBubble) =>
+      countBubble.classList.toggle(classes$1.hidden, itemCount === 0)
+    );
+  }
+
+  renderPriceLiveRegion(state) {
+    const subtotal = state.total_price;
+
+    this.elements.priceLiveRegion =
+      this.elements.priceLiveRegion ||
+      this.elements.cart.querySelector(selectors$1.priceLiveRegion);
+
+    const priceLiveRegionText = this.formatPriceLiveRegionText(subtotal);
+
+    this.elements.priceLiveRegion.textContent = priceLiveRegionText;
+    this.elements.priceLiveRegion.setAttribute('aria-hidden', false);
+
+    window.setTimeout(() => {
+      this.elements.priceLiveRegion.setAttribute('aria-hidden', true);
+    }, 1000);
+  }
+
+  formatPriceLiveRegionText(subtotal) {
+    const formattedSubtotal = formatMoney(subtotal, theme.moneyFormat);
+    return `${theme.strings.subtotal}: ${formattedSubtotal}`;
+  }
+
+  getItemFromState(key, state) {
+    return state.items.find((item) => item.key === key);
+  }
+}
+
+const selectors$2 = {
+  quantityIndicatorId: (id) => `[data-quantity-indicator="${id}"]`,
+  quantityInputKey: (key) => `[data-quantity-input-key="${key}"]`,
+  quantityNumber: '[data-quantity-number]',
+  quantityLabel: '[data-quantity-label]',
 };
 
-/*
-
-Cart Drawer Extension
---------------------------------------------------------------------------------
-Manages the drawer functionality of the cart drawer section
-
-
-Events
-------------
-
-Name: drawer_open_start
-Description: Fired before the cart drawer starts to open
-Payload: none
-
-Name: drawer_open_transitioning
-Description: Fired while the cart drawer is transitioning open
-Payload: none
-
-Name: drawer_open_done
-Description: Fired while the cart drawer is done transitioning open
-Payload: none
-
-Name: drawer_close_start
-Description: Fired before the cart drawer starts to close
-Payload: none
-
-Name: drawer_close_transitioning
-Description: Fired while the cart drawer is transitioning close
-Payload: none
-
-Name: drawer_close_done
-Description: Fired while the cart drawer is done transitioning close
-Payload: none
-
-Name: drawer_dragging
-Description: Fired while the cart drawer is being dragged closed by the user
-Payload: { object } Coordinates
-
-*/
-
-var classes$9 = {
-  drawerActive: 'drawer--active',
-  disableScroll: 'disable-scroll'
+const classes$2 = {
+  inCart: 'in-cart',
+  isVisible: 'is-visible',
+  updated: 'updated',
 };
 
-var selectors$9 = {
-  drawerPush: '[data-drawer-push]',
-  drawerCover: '.drawer-cover',
-  mainContent: '.main-content',
-  siteHeader: '.site-header'
-};
+class CartQuantity {
+  constructor() {
+    this.cartState = {};
+  }
 
-var drawer = {
-  init: function() {
-    // Used to keep track of which button toggled the drawer so we can return
-    // focus to it when the drawer closes.
-    this.$toggleButton = null;
-    this.draggingAction = null;
-    this.namespaceTouch = '.onTouchStart';
-    this.namespaceOpen = '.onOpen';
+  updateLocalCartState(newState, updatedItem) {
+    if (newState) {
+      this.cartState = this._convertToLocalCartState(newState);
+      this.updateQuantityIndicatorElements([updatedItem]);
+    } else {
+      getState().then((state) => {
+        this.cartState = this._convertToLocalCartState(state);
+        this.updateQuantityIndicatorElements();
+      });
+    }
+  }
 
-    // Drawer width might change when resizing the window. Make sure that we have
-    // the right drawer width to translate the page with.
-    this.document().on('resize', this._onWindowResize.bind(this));
-  },
+  updateQuantityInputElements(key, quantity) {
+    const quantityInputs = document.querySelectorAll(
+      selectors$2.quantityInputKey(key)
+    );
 
-  drawerOpen: function(evt) {
-    this.trigger('drawer_open_start');
+    quantityInputs.forEach((quantityInput) => {
+      quantityInput.dataset.quantityInCart = quantity;
+      quantityInput.value = quantity;
 
-    a11y$1.trapFocus({
-      $container: this.$container,
-      namespace: 'drawer'
+      if (quantity) return;
+      quantityInput.dispatchEvent(new window.CustomEvent('removedFromCart'));
+    });
+  }
+
+  updateQuantityIndicatorElements(updatedIds, context = document, newElements) {
+    const updatedProductIds = updatedIds || Object.keys(this.cartState);
+
+    updatedProductIds.forEach((productId) => {
+      const quantity = this.cartState[productId];
+
+      if (!quantity && newElements) return;
+
+      const quantityIndicators = context.querySelectorAll(
+        selectors$2.quantityIndicatorId(productId)
+      );
+
+      quantityIndicators.forEach((quantityIndicator) => {
+        this._setQuantityIndicator(quantityIndicator, quantity);
+      });
+    });
+  }
+
+  _convertToLocalCartState(state) {
+    const localCartState = {};
+
+    state.items.forEach((item) => {
+      if (!localCartState[item.product_id]) localCartState[item.product_id] = 0;
+
+      localCartState[item.product_id] += item.quantity;
     });
 
-    // If this function is used as an event handler, e.g. a click event on a
-    // button to open the drawer, than make sure to set whatever element that
-    // triggered the event to aria-expanded = true
-    if (evt && evt.currentTarget) {
-      this.$toggleButton = $(evt.target).attr('aria-expanded', true);
+    return localCartState;
+  }
+
+  _setQuantityIndicator(quantityIndicator, quantity) {
+    const quantityNumber = quantityIndicator.querySelector(
+      selectors$2.quantityNumber
+    );
+    const currentQuantity = parseInt(quantityNumber.dataset.quantity, 10);
+    const newQuantity = quantity ? quantity : 0;
+
+    if (currentQuantity === newQuantity) return;
+
+    if (quantityIndicator.classList.contains(classes$2.isVisible) && quantity) {
+      this._animateUpdate(quantityIndicator);
+    } else {
+      this._animateShowOrHide(quantityIndicator, newQuantity);
     }
 
-    utils.disableScrollBody();
+    quantityNumber.dataset.quantity = newQuantity;
 
-    $('body').addClass(classes$9.drawerActive);
-    this.trigger('drawer_open_transitioning');
+    const quantityText = newQuantity < 100 ? newQuantity : '99+';
+    quantityNumber.textContent = quantityText;
 
-    utils.promiseTransitionEnd(this.$container).then(
-      function() {
-        utils.enableTabbingOfChildren(this.$container);
-        this.$container.attr('aria-hidden', false);
+    const ariaLabel =
+      quantity === 1
+        ? quantityIndicator.dataset.labelSingle
+        : quantityIndicator.dataset.labelMulti.replace(
+            '[quantity]',
+            newQuantity
+          );
 
-        this.document().on(
-          'click touchend' + this.namespaceOpen,
-          selectors$9.drawerCover,
-          this.drawerClose.bind(this)
-        );
-        this.document().on(
-          'keyup' + this.namespaceOpen,
-          this._closeOnEscape.bind(this)
-        );
-        this.document().on(
-          'touchstart' + this.namespaceOpen,
-          this._onTouchStart.bind(this)
-        );
-
-        this.trigger('drawer_open_done');
-      }.bind(this)
+    const quantityLabel = quantityIndicator.querySelector(
+      selectors$2.quantityLabel
     );
-  },
+    quantityLabel.textContent = ariaLabel;
+  }
 
-  drawerClose: function() {
-    this.trigger('drawer_close_start');
+  _animateShowOrHide(quantityIndicator, visible) {
+    quantityIndicator.classList.toggle(classes$2.inCart, visible);
 
-    a11y$1.removeTrapFocus({ namespace: 'drawer' });
-
-    // If we detected a toggle button on open and set one, then let's return the
-    // focus to it and then remove our saved reference to it.
-    if (this.$toggleButton && this.$toggleButton.length) {
-      this.$toggleButton.focus().attr('aria-expanded', false);
-      this.$toggleButton = null;
+    if (visible) {
+      quantityIndicator.classList.add(classes$2.isVisible);
+      return;
     }
 
-    utils.enableScrollBody();
-    utils.disableTabbingOfChildren(this.$container);
-    this.$container.attr('aria-hidden', true);
+    promiseTransitionEnd(quantityIndicator).then(() => {
+      quantityIndicator.classList.remove(classes$2.isVisible);
+    });
+  }
 
-    this.document().off(this.namespaceOpen);
+  _animateUpdate(quantityIndicator) {
+    quantityIndicator.classList.add(classes$2.updated);
 
-    $('body').removeClass(classes$9.drawerActive);
-    this.trigger('drawer_close_transitioning');
+    promiseTransitionEnd(quantityIndicator).then(() => {
+      quantityIndicator.classList.remove(classes$2.updated);
+    });
+  }
+}
 
-    utils.promiseTransitionEnd(this.$container).then(
-      function() {
-        this.trigger('drawer_close_done');
-      }.bind(this)
+const selectors$3 = {
+  form: '[data-form]',
+  formInputWrapper: '[data-form-input-wrapper]',
+  formStatus: '[data-form-status]',
+};
+
+const classes$3 = {
+  floatingLabel: 'form__input-wrapper--floating-label',
+};
+
+class Form {
+  constructor() {
+    const forms = document.querySelectorAll(selectors$3.form);
+
+    forms.forEach((form) => {
+      this._focusFormStatus(form);
+      this._handleFormInputLabels(form);
+    });
+  }
+
+  /**
+   * If there are elements that contain '[data-form-status]' after submitting a form, focus to that element.
+   */
+  _focusFormStatus(form) {
+    const formStatus = form.querySelector(selectors$3.formStatus);
+
+    if (!formStatus) return;
+
+    formStatus.focus();
+
+    formStatus.addEventListener('blur', () => {
+      formStatus.removeAttribute('tabindex');
+    });
+  }
+
+  _handleFormInputLabels(form) {
+    const inputWrappers = form.querySelectorAll(selectors$3.formInputWrapper);
+
+    if (!inputWrappers) return;
+
+    inputWrappers.forEach((inputWrapper) => {
+      inputWrapper.addEventListener('focusin', () => {
+        inputWrapper.classList.add(classes$3.floatingLabel);
+      });
+
+      inputWrapper.addEventListener('focusout', (event) => {
+        const input = event.target;
+
+        if (input.value !== '') return;
+
+        inputWrapper.classList.remove(classes$3.floatingLabel);
+      });
+    });
+  }
+}
+
+const classes$4 = {
+  cookiesDisabled: 'cookies-disabled',
+};
+
+class CartTemplate {
+  constructor(cartElement) {
+    this.elements = {
+      cart: cartElement,
+    };
+  }
+
+  init() {
+    if (!cookiesEnabled()) {
+      this.elements.cart.classList.add(classes$4.cookiesDisabled);
+    }
+  }
+}
+
+const selectors$4 = {
+  arrow: '[data-scroller-arrow]',
+  menu: '[data-scroller-content]',
+  wrapper: '[data-scroller-wrapper]',
+};
+
+const classes$5 = {
+  noTransition: 'scroller-content--no-transition',
+  wrapper: 'scroller-wrapper',
+};
+
+const config = {
+  offset: 150,
+};
+
+class Scroller {
+  constructor(container) {
+    this.container = container;
+  }
+
+  init() {
+    this.wrapper = this.container.querySelector(selectors$4.wrapper);
+    if (!this.wrapper) return;
+
+    this.initialized = true;
+    this.menu = this.wrapper.querySelector(selectors$4.menu);
+    this.arrows = this.container.querySelectorAll(selectors$4.arrow);
+    this.isTransitioning = false;
+
+    this._setupEventHandlers();
+
+    promiseStylesheet().then(() => {
+      this._recalculateOverflow();
+    });
+  }
+
+  makeElementVisible(element) {
+    if (this.overflowValue === 'none' || !this.initialized) return;
+
+    let elementVisible = true;
+    const offset = config.offset / 2;
+    const elementRect = element.getBoundingClientRect();
+    const elementLeft = Math.floor(elementRect.left) - offset;
+    const elementRight = Math.floor(elementRect.right) + offset;
+
+    if (!this.wrapperRect) this._recalculateOverflow();
+
+    if (elementRight > this.wrapperRect.right) {
+      this.direction = 'next';
+      elementVisible = false;
+    } else if (elementLeft < this.wrapperRect.left) {
+      this.direction = 'previous';
+      elementVisible = false;
+    }
+
+    if (elementVisible || this.isTransitioning) return;
+
+    this.isTransitioning = true;
+    const distance = this._getDistanceToElement(
+      elementRight,
+      element.offsetLeft,
+      offset
     );
+    this._setMenuTranslateX(distance);
+  }
+
+  destroy() {
+    if (!this.initialized) return;
+    this.wrapper.removeEventListener(
+      'scroll',
+      this.eventHandlers.recalculateOverflow,
+      { passive: true }
+    );
+
+    window.removeEventListener('resize', this.eventHandlers.debounceScroller);
+
+    this.arrows.forEach((arrow) => {
+      arrow.removeEventListener('click', this.eventHandlers.onArrowClick);
+    });
+  }
+
+  _recalculateOverflow() {
+    const overflowValue = this._getOverflowValue();
+    this._setOverflowClass(overflowValue);
+  }
+
+  _setupEventHandlers() {
+    this.eventHandlers = this._getEventHandlers();
+    this.wrapper.addEventListener(
+      'scroll',
+      this.eventHandlers.recalculateOverflow,
+      { passive: true }
+    );
+
+    window.addEventListener('resize', this.eventHandlers.debounceScroller);
+
+    this.arrows.forEach((arrow) => {
+      arrow.addEventListener('click', this.eventHandlers.onArrowClick);
+    });
+  }
+
+  _getEventHandlers() {
+    return {
+      recalculateOverflow: this._recalculateOverflow.bind(this),
+      onArrowClick: this._onArrowClick.bind(this),
+      debounceScroller: debounce(() => {
+        this._recalculateOverflow();
+      }, 250),
+    };
+  }
+
+  _getOverflowValue() {
+    this._getSelectorsDomRect();
+    const wrapperLeft = Math.floor(this.wrapperRect.left);
+    const wrapperRight = Math.floor(this.wrapperRect.right);
+    const menuLeft = Math.floor(this.menuRect.left);
+    const menuRight = Math.floor(this.menuRect.right);
+
+    const leftOverflow = menuLeft < wrapperLeft;
+    const rightOverflow = menuRight > wrapperRight;
+
+    let overflowValue = 'none';
+    if (leftOverflow && rightOverflow) {
+      overflowValue = 'both';
+    } else if (leftOverflow) {
+      overflowValue = 'left';
+    } else if (rightOverflow) {
+      overflowValue = 'right';
+    }
+
+    return overflowValue;
+  }
+
+  _getSelectorsDomRect() {
+    this.wrapperRect = this.wrapper.getBoundingClientRect();
+    this.menuRect = this.menu.getBoundingClientRect();
+  }
+
+  _setOverflowClass(overflowValue) {
+    if (this.overflowValue === overflowValue) return;
+
+    this.wrapper.classList.remove(`${classes$5.wrapper}--${this.overflowValue}`);
+
+    window.requestAnimationFrame(() => {
+      this.wrapper.classList.add(`${classes$5.wrapper}--${overflowValue}`);
+      this.overflowValue = overflowValue;
+    });
+  }
+
+  _onArrowClick(event) {
+    if (this.isTransitioning) return;
+
+    this.isTransitioning = true;
+    this.direction = event.currentTarget.dataset.scrollerArrowDirection;
+
+    const offset = config.offset;
+    let distance = this._getDistanceToNextPosition();
+    distance = distance < offset * 2 ? distance : offset;
+    this._setMenuTranslateX(distance);
+  }
+
+  _getDistanceToNextPosition() {
+    if (this.direction === 'next') {
+      return Math.round(this.menuRect.right - this.wrapperRect.right);
+    }
+
+    return this.wrapper.scrollLeft;
+  }
+
+  _getDistanceToElement(elementRight, elementLeft, offset) {
+    if (this.direction === 'next') {
+      const maxDistance = Math.ceil(
+        this.menuRect.width - this.wrapperRect.width - this.wrapper.scrollLeft
+      );
+
+      let distance = Math.round(elementRight - this.wrapperRect.right) + offset;
+      distance = distance < maxDistance ? distance : maxDistance;
+      return distance;
+    }
+
+    let distance = this.wrapper.scrollLeft - elementLeft + offset;
+    distance =
+      distance < this.wrapper.scrollLeft ? distance : this.wrapper.scrollLeft;
+    return distance;
+  }
+
+  _setMenuTranslateX(distance) {
+    const translateValue = this.direction === 'next' ? -distance : distance;
+
+    this.menu.style.transform = `translateX(${translateValue}px)`;
+    this.translatedValue = translateValue;
+    this.menu.classList.remove(classes$5.noTransition);
+
+    promiseTransitionEnd(this.menu).then(() => {
+      this._setWrapperScrollLeft();
+      this.isTransitioning = false;
+    });
+  }
+
+  _setWrapperScrollLeft() {
+    const translatedValue = Math.abs(this.translatedValue);
+
+    this.menu.style.transform = 'none';
+    this.menu.classList.add(classes$5.noTransition);
+
+    if (this.direction === 'previous') {
+      this.wrapper.scrollLeft -= translatedValue;
+    } else {
+      this.wrapper.scrollLeft += translatedValue;
+    }
+  }
+}
+
+const selectors$6 = {
+  disclosure: '[data-disclosure]',
+  disclosureList: '[data-disclosure-list]',
+  disclosureToggle: '[data-disclosure-toggle]',
+  disclosureInput: '[data-disclosure-input]',
+  disclosureOptions: '[data-disclosure-option]',
+};
+
+const classes$6 = {
+  listVisible: 'disclosure-list--visible',
+};
+
+class Disclosure {
+  constructor(container) {
+    this.disclosureForm = container;
+    this.disclosure = container.querySelector(selectors$6.disclosure);
+    this.disclosureList = container.querySelector(selectors$6.disclosureList);
+    this.disclosureToggle = container.querySelector(selectors$6.disclosureToggle);
+    this.disclosureInput = container.querySelector(selectors$6.disclosureInput);
+    this.disclosureOptions = container.querySelectorAll(
+      selectors$6.disclosureOptions
+    );
+
+    this._setupListeners();
+  }
+
+  destroy() {
+    this.disclosureToggle.removeEventListener(
+      'click',
+      this.eventHandlers.toggleList
+    );
+
+    this.disclosureOptions.forEach((disclosureOption) =>
+      disclosureOption.removeEventListener(
+        'click',
+        this.eventHandlers.connectOptions
+      )
+    );
+
+    this.disclosure.removeEventListener(
+      'keyup',
+      this.eventHandlers.onDisclosureKeyUp
+    );
+
+    this.disclosureList.removeEventListener(
+      'focusout',
+      this.eventHandlers.onDisclosureListFocusOut
+    );
+
+    this.disclosureToggle.removeEventListener(
+      'focusout',
+      this.eventHandlers.onDisclosureToggleFocusOut
+    );
+
+    document.body.removeEventListener('click', this.eventHandlers.onBodyClick);
+  }
+
+  _setupListeners() {
+    this.eventHandlers = this._setupEventHandlers();
+
+    this.disclosureToggle.addEventListener(
+      'click',
+      this.eventHandlers.toggleList
+    );
+
+    this.disclosureOptions.forEach((disclosureOption) => {
+      disclosureOption.addEventListener(
+        'click',
+        this.eventHandlers.connectOptions
+      );
+    });
+
+    this.disclosure.addEventListener(
+      'keyup',
+      this.eventHandlers.onDisclosureKeyUp
+    );
+
+    this.disclosureList.addEventListener(
+      'focusout',
+      this.eventHandlers.onDisclosureListFocusOut
+    );
+
+    this.disclosureToggle.addEventListener(
+      'focusout',
+      this.eventHandlers.onDisclosureToggleFocusOut
+    );
+
+    document.body.addEventListener('click', this.eventHandlers.onBodyClick);
+  }
+
+  _setupEventHandlers() {
+    return {
+      connectOptions: this._connectOptions.bind(this),
+      toggleList: this._toggleList.bind(this),
+      onBodyClick: this._onBodyClick.bind(this),
+      onDisclosureKeyUp: this._onDisclosureKeyUp.bind(this),
+      onDisclosureListFocusOut: this._onDisclosureListFocusOut.bind(this),
+      onDisclosureToggleFocusOut: this._onDisclosureToggleFocusOut.bind(this),
+    };
+  }
+
+  _connectOptions(event) {
+    event.preventDefault();
+
+    this._submitForm(event.currentTarget.dataset.value);
+  }
+
+  _onDisclosureToggleFocusOut(event) {
+    const disclosureLostFocus =
+      this.disclosure.contains(event.relatedTarget) === false;
+
+    if (!disclosureLostFocus) return;
+
+    this._toggleList();
+  }
+
+  _onDisclosureListFocusOut(event) {
+    const childInFocus = event.currentTarget.contains(event.relatedTarget);
+
+    const isVisible = this.disclosureList.classList.contains(
+      classes$6.listVisible
+    );
+
+    if (isVisible && !childInFocus) {
+      this._toggleList();
+    }
+  }
+
+  _onDisclosureKeyUp(event) {
+    if (event.key.toLowerCase() !== keyCodes.ESC) return;
+    this._toggleList();
+    this.disclosureToggle.focus();
+  }
+
+  _onBodyClick(event) {
+    const isOption = this.disclosure.contains(event.target);
+    const isVisible = this.disclosureList.classList.contains(
+      classes$6.listVisible
+    );
+
+    if (isVisible && !isOption) {
+      this._toggleList();
+    }
+  }
+
+  _submitForm(value) {
+    this.disclosureInput.value = value;
+    this.disclosureForm.submit();
+  }
+
+  _toggleList() {
+    const ariaExpanded =
+      this.disclosureToggle.getAttribute('aria-expanded') === 'true';
+
+    this.disclosureList.classList.toggle(classes$6.listVisible);
+    this.disclosureToggle.setAttribute('aria-expanded', !ariaExpanded);
+  }
+}
+
+const selectors$5 = {
+  disclosureForm: '[data-disclosure-form]',
+};
+
+sections.register('footer', {
+  onLoad() {
+    const disclosureForms = Array.from(
+      this.container.querySelectorAll(selectors$5.disclosureForm)
+    );
+
+    this.disclosures = disclosureForms.map((disclosureForm) => {
+      return new Disclosure(disclosureForm);
+    });
   },
 
-  _onWindowResize: function() {
-    // Reset in case width changes on resize. Used for determining how much we
-    // want to translate the page to the side. Translating === sliderWidth.
-    this.sliderWidth = 0;
+  onUnload() {
+    this.disclosures.forEach((disclosure) => disclosure.destroy());
+  },
+});
+
+const selectors$7 = {
+  dropdownMenu: '[data-dropdown-menu]',
+  dropdownParent: '[data-dropdown-parent]',
+  dropdownParentType: (type) => `[data-dropdown-parent-type="${type}"]`,
+  headerIcon: '[data-header-icon]',
+  menuNavigation: '[data-menu-navigation]',
+  menuNavigationItem: '[data-menu-navigation-item]',
+  menuNavigationLastItem: '[data-menu-navigation-last-item]',
+  menuNavigationType: (menuType) => `[data-menu-navigation-type="${menuType}"]`,
+  mobileNavigationToggle: '[data-mobile-navigation-toggle]',
+  mobileNavigationContainer: '[data-mobile-navigation-container]',
+  mobileNavigationDrawer: '[data-mobile-navigation-drawer]',
+  header: '[data-header]',
+  stickySentinelHeader: '[data-sticky-sentinel-header]',
+  stickyCollectionHeader: '[data-sticky-element]',
+  logoImage: '[data-logo-image]',
+  announcementBar: '[data-announcement-bar]',
+  mainContent: '[data-main-content]',
+};
+
+const classes$7 = {
+  menuNavigationItemIsExpanded: 'menu-navigation__item--is-expanded',
+  menuDropdownItemIsExpanded: 'menu-dropdown__item--is-expanded',
+  menuNavigationHidden: 'menu-navigation-wrapper--hidden',
+  headerWrapperFixed: 'header-wrapper--fixed',
+  headerWrapperHidden: 'header-wrapper--hidden',
+  bodyWithStickyHeader: 'body-with-sticky-header',
+};
+
+const attributes = {
+  headerLogo: 'data-header-logo',
+  headerIcon: 'data-header-icon',
+  popupOpen: 'data-popup-open',
+  menuNavigationToggle: 'data-mobile-navigation-toggle',
+  searchToggle: 'data-search-toggle',
+};
+
+const popups = {
+  cart: 'cart',
+  menuNavigation: 'menu-navigation',
+  search: 'search',
+};
+
+sections.register('header', {
+  onLoad() {
+    this.elements = this._getElements();
+    if (isIntersectionObserverAvailable()) {
+      this._prepareStickyHeader();
+    }
+
+    this._reloadHeaderPopups();
+
+    this.mqlLarge = window.matchMedia(getMediaQueryString('large'));
+    this.mqlSmall = window.matchMedia(getMediaQueryString('medium', 'max'));
+
+    this.drawerMenuIsActive = !this.mqlLarge.matches;
+
+    if (this.elements.menuNavigation) this._handleMenuNavigationWidth();
+    this._setupEventHandlers();
   },
 
-  _onTouchStart: function(event) {
-    this.startPosition = utils.pointerEventToXY(event);
-    this.$elementsToPush = this.$elementsToPush || $(selectors$9.drawerPush); // eslint-disable-line shopify/jquery-dollar-sign-reference
-    this.sliderWidth = this.sliderWidth || this.$container.width();
-    this.isDragging = false;
-
-    this.document().on(
-      'touchmove' + this.namespaceTouch,
-      this._onTouchMove.bind(this)
-    );
-    this.document().on(
-      'touchend' + this.namespaceTouch,
-      this._onTouchEnd.bind(this)
-    );
-  },
-
-  _onTouchMove: function(event) {
-    var dx;
-    var dy;
-    var deg;
-    var transform;
-
-    this.isDragging = true;
-    this.currentPosition = utils.pointerEventToXY(event);
-    this.trigger('drawer_dragging', [this.currentPosition]);
-
-    dx = this.currentPosition.x - this.startPosition.x;
-    dy = this.currentPosition.y - this.startPosition.y;
-    deg = Math.atan2(dx, dy) / (Math.PI / 180);
-    this.translated = dx > 0 ? dx : 0;
+  _reloadHeaderPopups() {
+    if (!window.popups) return;
 
     if (
-      Math.abs(deg) > 65 &&
-      Math.abs(deg) < 115 &&
-      this.draggingAction === null
+      !window.popups.find((popup) => popup.name === popups.menuNavigation) &&
+      this.elements.menuNavigation
     ) {
-      this.draggingAction = 'slide';
-    } else if (
-      (Math.abs(deg) < 65 || Math.abs(deg) > 115) &&
-      this.draggingAction === null
-    ) {
-      this.draggingAction = 'scroll';
+      window.popups.push(new Popup(popups.menuNavigation));
     }
 
-    if (this.draggingAction === 'slide') {
-      event.preventDefault();
+    Object.values(popups).forEach((popupType) => {
+      const targetPopup = window.popups.find(
+        (popup) => popup.name === popupType
+      );
 
-      transform = {
-        transform:
-          'translateX(-' + (this.sliderWidth - this.translated) + 'px)',
-        transition: 'none'
-      };
+      if (!targetPopup) return;
 
-      this.$elementsToPush.css(transform);
-    }
-  },
-
-  _onTouchEnd: function() {
-    var percentMoved;
-
-    this.wasDragging = this.isDragging;
-    this.isDragging = false;
-
-    if (this.wasDragging) {
-      percentMoved = this.translated / this.sliderWidth;
-      if (percentMoved > 0.25 && this.draggingAction === 'slide') {
-        this.drawerClose('ease-out');
-        this.trigger('drawer_dragging_success');
-      } else {
-        this.trigger('drawer_dragging_fail');
-      }
-
-      this.$elementsToPush.removeAttr('style');
-    }
-
-    this.draggingAction = null;
-
-    this.document().off(this.namespaceTouch);
-  },
-
-  _closeOnEscape: function(evt) {
-    if (evt.keyCode === 27) {
-      this.drawerClose();
-    }
-  }
-};
-
-/*
-
-Cart Drawer Section
---------------------------------------------------------------------------------
-Creates a page drawer with AJAX cart functionilty
-
-*/
-
-// Extensions
-// Libs
-var selectors$7 = {
-  drawer: '.drawer',
-  cartHeader: '.cart-drawer__header',
-  cartTitle: '.cart-drawer__header-title',
-  cartContent: '.cart-drawer__content',
-  cartToggle: '.ajax-cart__toggle',
-  cartCloseButton: '.cart-drawer__close-button',
-  siteHeader: '.site-header'
-};
-
-var classes$7 = {
-  cartTemplate: 'template-cart',
-  cartEmpty: 'cart-drawer--empty',
-  cartNoCookies: 'cart-drawer--no-cookies'
-};
-
-sections.register('cart-drawer', {
-  onLoad: function() {
-    if ($(document.body).hasClass(classes$7.cartTemplate)) return;
-
-    // Setup the drawer functionality
-    this.extend(drawer);
-    this._setDrawerHeaderHeight();
-    this.on('drawer_close_done', this._onDrawerClose.bind(this));
-    this.document().on(
-      'click',
-      selectors$7.cartToggle,
-      this._openCartDrawer.bind(this)
-    );
-
-    // If cookies are disabled, then add a class which shows a warning and don't
-    // continue any further. We don't want the AJAX Cart functionality.
-    if (!utils.cookiesEnabled()) {
-      this.$container.addClass(classes$7.cartNoCookies);
-      return;
-    }
-
-    this.extend(ajaxCart);
-    cart.on(
-      'change',
-      function(event, state) {
-        this.$ajaxCart.toggleClass(classes$7.cartEmpty, state.items.length === 0);
-      }.bind(this)
-    );
-  },
-
-  onSelect: function() {
-    this._openCartDrawer();
-  },
-
-  onDeselect: function() {
-    this._closeCartDrawer();
-  },
-
-  _onDrawerClose: function() {
-    sections.getInstances('header-section').then(function(instances) {
-      instances[0].scrollHandler = true;
+      targetPopup.init();
     });
   },
 
-  _setDrawerHeaderHeight: function() {
-    var $cartHeader = $(selectors$7.cartHeader, this.$container);
-    var siteHeaderHeight = $(selectors$7.siteHeader).outerHeight();
-
-    $cartHeader.css('height', siteHeaderHeight);
+  _getElements() {
+    return {
+      announcementBar: this.container.querySelector(selectors$7.announcementBar),
+      cartPriceBubbleContainers: this.container.querySelectorAll(
+        selectors$7.cartPriceBubbleContainer
+      ),
+      desktopNavigation: this.container.querySelector(
+        selectors$7.menuNavigationType('desktop')
+      ),
+      dropdownParents: this.container.querySelectorAll(
+        selectors$7.dropdownParent
+      ),
+      header: this.container.querySelector(selectors$7.header),
+      headerIcons: Array.from(
+        this.container.querySelectorAll(selectors$7.headerIcon)
+      ),
+      headerLogo: this.container.querySelector(selectors$7.logoImage),
+      headerSentinel: document.querySelector(selectors$7.stickySentinelHeader),
+      headerWrapper: this.container,
+      menuNavigation: this.container.querySelector(selectors$7.menuNavigation),
+      menuNavigationItems: this.container.querySelectorAll(
+        selectors$7.menuNavigationItem
+      ),
+      mobileNavigationToggle: this.container.querySelector(
+        selectors$7.mobileNavigationToggle
+      ),
+    };
   },
 
-  _openCartDrawer: function(evt) {
-    evt.preventDefault();
+  _setupEventHandlers() {
+    this.eventHandlers = this._getEventHandlers();
 
-    sections
-      .getInstances('header-section')
-      .then(function(instances) {
-        instances[0].scrollHandler = false;
-        return instances[0].hideNavigation();
-      })
-      .then(
-        function() {
-          this.drawerOpen(evt);
+    if (isIntersectionObserverAvailable()) {
+      window.addEventListener('scroll', this.eventHandlers.toggleHeaderSticky, {
+        passive: true,
+      });
 
-          $(selectors$7.cartContent, this.$container).scrollTop(0);
+      document.addEventListener(
+        'productAddedToCart',
+        this.eventHandlers.productAddedToCart
+      );
 
-          a11y$1.forceFocus($(selectors$7.cartTitle, this.$container));
+      document.addEventListener(
+        'featuredCollectionTabClicked',
+        this.eventHandlers.preventHeaderSlideIn
+      );
 
-          this.$container.on(
-            'click',
-            selectors$7.cartCloseButton,
-            this._closeCartDrawer.bind(this)
+      document.addEventListener(
+        'elementSticky',
+        this.eventHandlers.featuredCollectionSticky
+      );
+    }
+
+    if (this.elements.menuNavigation) {
+      this.elements.dropdownParents.forEach((parent) =>
+        parent.addEventListener(
+          'click',
+          this.eventHandlers.onDropdownParentClick
+        )
+      );
+
+      window.addEventListener('resize', this.eventHandlers.onWindowResize);
+
+      this.elements.mobileNavigationToggle.addEventListener(
+        'click',
+        this.eventHandlers.handleMobileNavigation
+      );
+    }
+  },
+
+  _getEventHandlers() {
+    return {
+      handleMultiplePopups: this._handleMultiplePopups.bind(this),
+      onBodyClick: this._onBodyClick.bind(this),
+      onDrawerNavigationKeyup: this._onDrawerNavigationKeyup.bind(this),
+      onDropdownFocusOut: this._onDropdownFocusOut.bind(this),
+      onDropdownKeyup: this._onDropdownKeyup.bind(this),
+      onDropdownParentClick: this._onDropdownParentClick.bind(this),
+      onWindowResize: debounce(() => this._onWindowResize(), 250),
+      handleMobileNavigation: this._handleMobileNavigation.bind(this),
+      toggleHeaderSticky: debounce(() => this._toggleHeaderPosition(), 100),
+      featuredCollectionSticky: this._featuredCollectionSticky.bind(this),
+      productAddedToCart: this._productAddedToCart.bind(this),
+      preventHeaderSlideIn: this._preventHeaderSlideIn.bind(this),
+    };
+  },
+
+  _onWindowResize() {
+    const activeParentDropdown = this._getDesktopActiveParentDropdown();
+    const isDrawerNavigationOpen =
+      this.elements.mobileNavigationToggle.getAttribute('aria-expanded') ===
+      'true';
+
+    if (this.scrolledPastHeader) return;
+
+    this._handleMenuNavigationWidth();
+
+    if (this.drawerMenuIsActive && activeParentDropdown) {
+      this._closeActiveDropdown();
+    } else if (!this.drawerMenuIsActive && activeParentDropdown) {
+      this.elements.menuNavigation.style.overflow = 'initial';
+    } else if (isDrawerNavigationOpen && !this.drawerMenuIsActive) {
+      this._closeMobileNavigation();
+    } else if (isDrawerNavigationOpen && this.drawerMenuIsActive) {
+      this._toggleHeaderIcons(true);
+    }
+  },
+
+  _handleMenuNavigationWidth() {
+    if (!this.mqlLarge.matches) {
+      this.drawerMenuIsActive = true;
+      return;
+    }
+
+    this.elements.menuNavigation.style.overflow = 'hidden';
+
+    const menuPositionRight = this.elements.menuNavigation.getBoundingClientRect()
+      .right;
+    const lastMenuItemPositionRight = this.elements.menuNavigation
+      .querySelector(selectors$7.menuNavigationLastItem)
+      .getBoundingClientRect().right;
+
+    if (menuPositionRight >= lastMenuItemPositionRight) {
+      this.elements.menuNavigation.classList.remove(
+        classes$7.menuNavigationHidden
+      );
+
+      this.drawerMenuIsActive = false;
+    } else {
+      this.elements.menuNavigation.classList.add(classes$7.menuNavigationHidden);
+      this.drawerMenuIsActive = true;
+    }
+  },
+
+  _onDropdownFocusOut(event) {
+    event.preventDefault();
+
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+
+    const dropdownParent = event.currentTarget.previousElementSibling;
+
+    this._toggleMenuDropdown(dropdownParent);
+  },
+
+  _closeActiveDropdown() {
+    const activeParent = this._getDesktopActiveParentDropdown();
+
+    if (!activeParent) return;
+
+    this._animateDropdownClosed(
+      activeParent.nextElementSibling,
+      activeParent,
+      false
+    );
+  },
+
+  _getDesktopActiveParentDropdown() {
+    return this.elements.desktopNavigation.querySelector(
+      `${selectors$7.dropdownParent}${selectors$7.dropdownParentType(
+        'main'
+      )}[aria-expanded="true"]`
+    );
+  },
+
+  _onDropdownParentClick(event) {
+    const parent = event.currentTarget;
+
+    if (
+      parent.dataset.dropdownParentType === 'main' &&
+      parent.closest(selectors$7.menuNavigationType('desktop'))
+    ) {
+      event.stopImmediatePropagation();
+      this._onBodyClick();
+    }
+
+    const dropdowns = parent.parentElement.querySelectorAll(
+      selectors$7.dropdownMenu
+    );
+
+    this._setupDropdowns(dropdowns);
+    this._toggleMenuDropdown(parent);
+  },
+
+  _setupDropdowns(dropdownMenus) {
+    dropdownMenus.forEach((dropdown, index) => {
+      if (dropdown.dataset.maxHeight) return;
+
+      if (
+        index === 0 &&
+        dropdown.closest(selectors$7.menuNavigationType('desktop'))
+      ) {
+        this._setupMainLevelDropdown(dropdown);
+      } else {
+        this._setupChildAndMobileDropdown(dropdown);
+      }
+    });
+  },
+
+  _setupMainLevelDropdown(dropdown) {
+    dropdown.style.whiteSpace = 'nowrap';
+
+    const { width, height } = dropdown.getBoundingClientRect();
+
+    dropdown.dataset.width = `${width}px`;
+    dropdown.style.width = width < 260 ? `${width}px` : '26rem';
+    dropdown.style.removeProperty('white-space');
+    dropdown.dataset.maxHeight =
+      width < 260
+        ? `${height}px`
+        : `${dropdown.getBoundingClientRect().height}px`;
+    dropdown.style.maxHeight = '0px';
+  },
+
+  _setupChildAndMobileDropdown(dropdown) {
+    dropdown.dataset.maxHeight = `${dropdown.getBoundingClientRect().height}px`;
+    dropdown.style.maxHeight = '0px';
+  },
+
+  _toggleMenuDropdown(parent) {
+    const isExpanded = parent.getAttribute('aria-expanded') === 'true';
+    const dropdown = parent.nextElementSibling;
+
+    if (isExpanded) {
+      this._animateDropdownClosed(dropdown, parent);
+    } else {
+      this._animateDropdownOpen(dropdown, parent);
+    }
+  },
+
+  _animateDropdownClosed(dropdown, parent, animate = true) {
+    const isSecondLevelDropdown = parent.dataset.dropdownParentType === 'main';
+
+    if (isSecondLevelDropdown) {
+      parent.classList.remove(classes$7.menuNavigationItemIsExpanded);
+
+      if (dropdown.closest(selectors$7.menuNavigationType('desktop')))
+        dropdown.removeEventListener(
+          'focusout',
+          this.eventHandlers.onDropdownFocusOut
+        );
+    } else {
+      parent.classList.remove(classes$7.menuDropdownItemIsExpanded);
+    }
+
+    dropdown.style.maxHeight = '0px';
+    dropdown.style.opacity = 0;
+
+    if (animate) {
+      promiseTransitionEnd(dropdown).then(() => {
+        this._closeDropdown(parent, dropdown, isSecondLevelDropdown);
+      });
+    } else {
+      this._closeDropdown(parent, dropdown, isSecondLevelDropdown);
+    }
+  },
+
+  _closeDropdown(parent, dropdown, isSecondLevelDropdown) {
+    parent.setAttribute('aria-expanded', 'false');
+
+    if (
+      !isSecondLevelDropdown ||
+      !dropdown.closest(selectors$7.menuNavigationType('desktop'))
+    )
+      return;
+
+    if (!this._getDesktopActiveParentDropdown()) {
+      this.elements.menuNavigation.style.overflow = 'hidden';
+    }
+
+    document.body.removeEventListener('click', this.eventHandlers.onBodyClick);
+
+    dropdown.removeEventListener('click', this._preventDropdownClick);
+
+    parent.parentNode.removeEventListener(
+      'keyup',
+      this.eventHandlers.onDropdownKeyup
+    );
+  },
+
+  _animateDropdownOpen(dropdown, parent) {
+    const isSecondLevelDropdown = parent.dataset.dropdownParentType === 'main';
+    const isDesktopNavigation = parent.closest(
+      selectors$7.menuNavigationType('desktop')
+    );
+
+    if (isSecondLevelDropdown) {
+      if (isDesktopNavigation)
+        this.elements.menuNavigation.style.overflow = 'initial';
+      parent.classList.add(classes$7.menuNavigationItemIsExpanded);
+
+      if (isDesktopNavigation)
+        dropdown.addEventListener(
+          'focusout',
+          this.eventHandlers.onDropdownFocusOut
+        );
+    } else {
+      parent.classList.add(classes$7.menuDropdownItemIsExpanded);
+    }
+
+    parent.setAttribute('aria-expanded', 'true');
+    dropdown.style.maxHeight = `${dropdown.dataset.maxHeight}`;
+    dropdown.style.opacity = 1;
+
+    if (!isDesktopNavigation || !isSecondLevelDropdown) return;
+
+    promiseTransitionEnd(dropdown).then(() => {
+      document.body.addEventListener('click', this.eventHandlers.onBodyClick);
+
+      dropdown.addEventListener('click', this._preventDropdownClick);
+
+      parent.parentNode.addEventListener(
+        'keyup',
+        this.eventHandlers.onDropdownKeyup
+      );
+    });
+  },
+
+  _onDropdownKeyup(event) {
+    if (event.key.toLowerCase() !== keyCodes.ESC) return;
+
+    const listItem = event.currentTarget;
+    const parent = listItem.querySelector(selectors$7.dropdownParentType('main'));
+    const dropdown = parent.nextElementSibling;
+
+    this._animateDropdownClosed(dropdown, parent);
+    parent.focus();
+  },
+
+  _preventDropdownClick(event) {
+    event.stopImmediatePropagation();
+  },
+
+  _onBodyClick() {
+    const expandedParentDropdown = this._getDesktopActiveParentDropdown();
+
+    if (!expandedParentDropdown) return;
+    const expandedDropdown = expandedParentDropdown.nextElementSibling;
+
+    this._animateDropdownClosed(expandedDropdown, expandedParentDropdown);
+  },
+
+  _handleMobileNavigation(event) {
+    const toggle = event.currentTarget;
+    const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+
+    if (isExpanded) {
+      this._closeMobileNavigation();
+    } else {
+      this._openMobileNavigation(toggle);
+      if (this.stickyHeaderTimeout) clearTimeout(this.stickyHeaderTimeout);
+      this.lastScrollDirection = 'none';
+    }
+  },
+
+  _closeMobileNavigation() {
+    this._toggleHeaderIcons();
+
+    if (this.elements.headerButtons.length) {
+      this.elements.headerButtons.forEach((button) =>
+        button.removeEventListener(
+          'click',
+          this.eventHandlers.handleMultiplePopups
+        )
+      );
+    }
+
+    document.removeEventListener(
+      'keyup',
+      this.eventHandlers.onDrawerNavigationKeyup
+    );
+
+    document.removeEventListener('focusin', this._onBodyFocusIn);
+
+    this.elements.drawerNavigationPopup.closePopup(false);
+  },
+
+  _openMobileNavigation(toggle) {
+    this.elements.drawerNavigationPopup =
+      this.elements.drawerNavigationPopup ||
+      window.popups.find((popup) => popup.name === popups.menuNavigation);
+
+    this.elements.headerButtons =
+      this.elements.headerButtons ||
+      this.elements.headerIcons.filter((icon) =>
+        icon.hasAttribute(attributes.popupOpen)
+      );
+
+    this._setupMobileNavigationDropdowns();
+    this._setMobileDrawerHeight();
+    this._toggleHeaderIcons(true);
+
+    if (this.elements.headerButtons.length) {
+      this.elements.headerButtons.forEach((button) =>
+        button.addEventListener(
+          'click',
+          this.eventHandlers.handleMultiplePopups
+        )
+      );
+    }
+
+    document.addEventListener(
+      'keyup',
+      this.eventHandlers.onDrawerNavigationKeyup
+    );
+
+    // to prevent menu drawer close button from displaying when
+    // clicking focusable elements in the heading
+    document.addEventListener('focusin', this._onBodyFocusIn);
+
+    this.elements.drawerNavigationPopup.openPopup({ currentTarget: toggle });
+  },
+
+  _onBodyFocusIn(event) {
+    const target = event.target;
+    if (
+      target.hasAttribute(attributes.headerIcon) ||
+      target.hasAttribute(attributes.menuNavigationToggle) ||
+      target.hasAttribute(attributes.headerLogo)
+    )
+      event.stopImmediatePropagation();
+  },
+
+  _setupMobileNavigationDropdowns() {
+    if (this.elements.mobileNavigation) return;
+
+    this.elements.mobileNavigation = this.elements.headerWrapper.querySelector(
+      selectors$7.menuNavigationType('mobile')
+    );
+
+    this.elements.mobileMenuParents = this.elements.mobileNavigation.querySelectorAll(
+      selectors$7.dropdownParent
+    );
+
+    this.elements.mobileMenuParents.forEach((parent) =>
+      this._setupDropdowns(
+        parent.parentElement.querySelectorAll(selectors$7.dropdownMenu)
+      )
+    );
+  },
+
+  _setMobileDrawerHeight() {
+    this.elements.mobileNavigationContainer =
+      this.elements.mobileNavigationContainer ||
+      this.elements.headerWrapper.querySelector(
+        selectors$7.mobileNavigationContainer
+      );
+
+    this.elements.mobileNavigationDrawer =
+      this.elements.mobileNavigationDrawer ||
+      this.elements.headerWrapper.querySelector(
+        selectors$7.mobileNavigationDrawer
+      );
+
+    const headerHeight = this.elements.headerWrapper.getBoundingClientRect()
+      .height;
+    const scrollPosition = window.pageYOffset;
+
+    const heightDifference = headerHeight - scrollPosition;
+    this.elements.mobileNavigationDrawer.style.top = `${headerHeight}px`;
+    this.elements.mobileNavigationContainer.style.height = `calc(100vh - ${heightDifference}px)`;
+  },
+
+  _toggleHeaderIcons(isDrawerNavigationOpen = false) {
+    const setHidden = this.mqlSmall.matches && isDrawerNavigationOpen;
+
+    this.elements.headerIcons.forEach((toggle) => {
+      if (setHidden) {
+        toggle.setAttribute('hidden', true);
+      } else {
+        toggle.removeAttribute('hidden');
+      }
+    });
+  },
+
+  _handleMultiplePopups(event) {
+    this.elements.popups = this.elements.popups || {};
+
+    const popupType = event.currentTarget.hasAttribute(attributes.searchToggle)
+      ? popups.search
+      : popups.cart;
+
+    this.elements.popups[popupType] =
+      this.elements.popups[popupType] ||
+      window.popups.find((popup) => popup.name === popupType);
+
+    const popupElements = this.elements.popups[popupType].getElements();
+
+    if (popupType === popups.search) {
+      this._closeMobileNavigation();
+    } else {
+      promiseTransitionEnd(popupElements.popup).then(() => {
+        this._closeMobileNavigation();
+      });
+    }
+  },
+
+  _onDrawerNavigationKeyup(event) {
+    if (event.key.toLowerCase() !== keyCodes.ESC) return;
+
+    this._toggleHeaderIcons();
+    document.removeEventListener(
+      'keyup',
+      this.eventHandlers.onDrawerNavigationKeyup
+    );
+  },
+
+  // Start of the code for sticky Nav
+  _prepareStickyHeader() {
+    this.featuredCollections = {};
+    this.previousScrollPosition = window.pageYOffset;
+    this.headerWrapperHeight = this.elements.headerWrapper.offsetHeight;
+    this.originalHeaderHeight = this.elements.header.offsetHeight;
+
+    this._setupHeaderObserver();
+    this.headerObserver.observe(this.elements.headerSentinel);
+
+    this.elements.headerWrapper.style.position = 'fixed';
+    document.querySelector(
+      selectors$7.mainContent
+    ).style.paddingTop = `${this.headerWrapperHeight}px`;
+  },
+
+  _setupHeaderObserver() {
+    this.headerObserver = new IntersectionObserver((data) => {
+      if (data[0].isIntersecting) {
+        this._resetSentinel();
+        this.scrolledPastHeader = false;
+        this._toggleInlineMenuOpacity();
+
+        // if it's on load and at the top, this.isFixed is undefined and I don't need to reset the header
+        if (this.isFixed === undefined) return;
+
+        requestAnimationFrame(() => {
+          this._resetHeader();
+        });
+      } else {
+        this.scrolledPastHeader = true;
+        this.isFixed = false;
+
+        this._headerSlideOut();
+
+        promiseTransitionEnd(this.elements.headerWrapper).then(() => {
+          this._toggleInlineMenuOpacity();
+          this.drawerMenuIsActive = true;
+        });
+
+        this.elements.headerWrapper.classList.add(classes$7.headerWrapperHidden);
+        this._moveSentinel();
+      }
+    });
+  },
+
+  _toggleHeaderPosition() {
+    if (this.isHeaderAnimating || this.doNotSlideHeaderIn) return;
+
+    const newScrollPosition = window.pageYOffset;
+    const scrollDirection =
+      newScrollPosition < this.previousScrollPosition ? 'up' : 'down';
+
+    this.previousScrollPosition = newScrollPosition;
+
+    if (
+      !this.scrolledPastHeader ||
+      this.lastScrollDirection === scrollDirection
+    )
+      return;
+
+    this.lastScrollDirection = scrollDirection;
+
+    if (scrollDirection === 'down') {
+      if (this.elements.menuNavigation) this._closeActiveDropdown();
+
+      if (this.isFixed) {
+        requestAnimationFrame(() => {
+          this._headerSlideOut();
+        });
+      } else {
+        if (this.elements.headerLogo)
+          this.elements.headerLogo.style.removeProperty('transition');
+        requestAnimationFrame(() => {
+          this.elements.headerWrapper.classList.add(
+            classes$7.headerWrapperHidden
           );
-        }.bind(this)
-      );
+        });
+      }
+    } else if (scrollDirection === 'up') {
+      this._clearStickyHeaderTimeout();
+      if (this.isFixed) return;
+      requestAnimationFrame(() => {
+        this._headerSlideIn();
+      });
+    }
   },
 
-  _closeCartDrawer: function() {
-    this.drawerClose();
-  }
+  _clearStickyHeaderTimeout() {
+    if (!this.stickyHeaderTimeout) return;
+
+    clearTimeout(this.stickyHeaderTimeout);
+  },
+
+  _productAddedToCart() {
+    if (!this.scrolledPastHeader) return;
+    if (!this.isFixed) {
+      if (this.isHeaderAnimating) {
+        setTimeout(() => {
+          this._headerSlideIn();
+        }, 500);
+
+        return;
+      }
+      this._headerSlideIn();
+    }
+    clearTimeout(this.stickyHeaderTimeout);
+    this.stickyHeaderTimeout = setTimeout(() => {
+      this._headerSlideOut();
+    }, 5000);
+  },
+
+  _preventHeaderSlideIn() {
+    this.doNotSlideHeaderIn = true;
+
+    if (this.isFixed) this._headerSlideOut();
+    this.lastScrollDirection = null;
+
+    this.preventHeaderSlideInTimeout = setTimeout(() => {
+      this.doNotSlideHeaderIn = false;
+      this.previousScrollPosition = window.pageYOffset;
+    });
+  },
+
+  _featuredCollectionSticky(event) {
+    const { stickyElement, isSticky, container } = event.detail;
+    const stickyId = container.dataset.sectionId;
+
+    this.featuredCollections[stickyId] = this.featuredCollections[stickyId] || {
+      stickyElement,
+      isSticky,
+    };
+    this.featuredCollections[stickyId].isSticky = isSticky;
+
+    this._toggleFeaturedCollectionStyle(this.featuredCollections[stickyId]);
+  },
+
+  _resetHeader() {
+    if (!this.elements.headerSentinel) return;
+
+    this.isFixed = false;
+    this.isHeaderAnimating = true;
+
+    this._clearStickyHeaderTimeout();
+
+    if (this.elements.menuNavigation) {
+      if (this.elements.headerLogo) {
+        promiseTransitionEnd(this.elements.headerLogo).then(() => {
+          this._handleMenuNavigationWidth();
+        });
+      } else {
+        this._handleMenuNavigationWidth();
+      }
+    }
+    this._toggleBodyClass();
+
+    if (this.elements.announcementBar)
+      this.elements.announcementBar.style.display = 'block';
+    this.elements.headerWrapper.classList.remove(
+      classes$7.headerWrapperFixed,
+      classes$7.headerWrapperHidden
+    );
+
+    if (!this.featuredCollections) return;
+
+    Object.keys(this.featuredCollections).forEach((stickyId) => {
+      const collection = this.featuredCollections[stickyId];
+      collection.stickyElement.style.transform = 'translateY(0)';
+      collection.stickyElement.style.removeProperty('transition');
+    });
+
+    this.isHeaderAnimating = false;
+  },
+
+  _headerSlideIn() {
+    this.isFixed = true;
+    this.isHeaderAnimating = true;
+    this.drawerMenuIsActive = true;
+
+    this._toggleBodyClass();
+
+    if (this.elements.announcementBar)
+      this.elements.announcementBar.style.display = 'none';
+    requestAnimationFrame(() => {
+      this.elements.headerWrapper.classList.add(classes$7.headerWrapperFixed);
+      this.elements.headerWrapper.classList.remove(classes$7.headerWrapperHidden);
+      this._checkForFeaturedCollection();
+    });
+
+    promiseTransitionEnd(this.elements.headerWrapper).then(() => {
+      if (this.elements.headerLogo) {
+        this.elements.headerLogo.style.transition = 'max-width 0.25s ease-out';
+      }
+      this.isHeaderAnimating = false;
+    });
+  },
+
+  _headerSlideOut() {
+    this.isFixed = false;
+    this.isHeaderAnimating = true;
+
+    this._toggleBodyClass();
+
+    if (this.elements.headerLogo)
+      this.elements.headerLogo.style.removeProperty('transition');
+
+    this.elements.headerWrapper.classList.add(classes$7.headerWrapperHidden);
+    promiseTransitionEnd(this.elements.headerWrapper).then(() => {
+      this.elements.headerWrapper.classList.remove(classes$7.headerWrapperFixed);
+      this.isHeaderAnimating = false;
+    });
+    this._checkForFeaturedCollection();
+    this._clearStickyHeaderTimeout();
+  },
+
+  _moveSentinel() {
+    this.elements.headerSentinel.style.transform = `translateY(-${this.originalHeaderHeight}px)`;
+  },
+
+  _resetSentinel() {
+    this.elements.headerSentinel.style.removeProperty('transform');
+  },
+
+  _toggleBodyClass() {
+    document.body.classList.toggle(classes$7.bodyWithStickyHeader, this.isFixed);
+  },
+
+  _toggleInlineMenuOpacity() {
+    if (!this.elements.menuNavigation || this.drawerMenuIsActive) return;
+
+    this.elements.menuNavigation.classList.toggle(
+      classes$7.menuNavigationHidden,
+      this.scrolledPastHeader
+    );
+  },
+
+  _checkForFeaturedCollection() {
+    if (!this.featuredCollections) return;
+
+    Object.keys(this.featuredCollections).forEach((stickyId) => {
+      const collection = this.featuredCollections[stickyId];
+
+      this._toggleFeaturedCollectionStyle(collection);
+    });
+  },
+
+  _toggleFeaturedCollectionStyle(collection) {
+    if (!this.isFixed || !collection.isSticky) {
+      collection.stickyElement.style.transform = 'translateY(0)';
+      promiseTransitionEnd(collection.stickyElement).then(() => {
+        collection.stickyElement.style.removeProperty('transition');
+      });
+    } else {
+      collection.stickyElement.style.transition = 'transform .25s ease-out';
+      collection.stickyElement.style.transform = `translateY(${this.elements.header.offsetHeight}px)`;
+    }
+  },
+
+  onUnload() {
+    window.removeEventListener(
+      'scroll',
+      this.eventHandlers.toggleHeaderSticky,
+      {
+        passive: true,
+      }
+    );
+
+    document.removeEventListener(
+      'productAddedToCart',
+      this.eventHandlers.productAddedToCart
+    );
+
+    document.removeEventListener(
+      'featuredCollectionTabClicked',
+      this.eventHandlers.preventHeaderSlideIn
+    );
+
+    document.removeEventListener(
+      'elementSticky',
+      this.eventHandlers.featuredCollectionSticky
+    );
+
+    if (this.headerObserver) {
+      this.headerObserver.disconnect();
+    }
+
+    if (!this.elements.menuNavigation) return;
+
+    this.elements.dropdownParents.forEach((parent) =>
+      parent.removeEventListener(
+        'click',
+        this.eventHandlers.onDropdownParentClick
+      )
+    );
+
+    window.removeEventListener('resize', this.eventHandlers.onWindowResize);
+
+    this.elements.mobileNavigationToggle.removeEventListener(
+      'click',
+      this.eventHandlers.handleMobileNavigation
+    );
+  },
 });
 
-/*
-
-Cart Template Section
---------------------------------------------------------------------------------
-Adds ajax cart functionality to the cart template
-
-*/
-
-// Extensions
-// Libs
-var classes$10 = {
-  showClass: 'cart-item__update--show',
-  showEditClass: 'cart-item__edit--active',
-  cartEmpty: 'cart--empty',
-  cartNoCookies: 'cart--no-cookies'
+const selectors$9 = {
+  mediaArrowPrev: '[data-media-arrow-previous]',
+  mediaArrowNext: '[data-media-arrow-next]',
+  mediaCurrent: '[data-media-current]',
+  mediaImages: '[data-media-image]',
+  mediaLiveRegion: '[data-media-liveregion]',
+  strip: '[data-media-strip]',
+  mediaIndicatorLabel: '[data-media-indicator-label]',
+  mediaWrapper: '[data-media-wrapper]',
+  mediaStripWrapper: '[data-media-strip-wrapper]',
 };
 
-sections.register('cart-template', {
-  onLoad: function() {
-    var $container = $(this.container);
+const classes$8 = {
+  isActive: 'is-active',
+  transitionReady: 'transition-ready',
+};
 
-    if (!utils.cookiesEnabled()) {
-      $container.addClass(classes$10.cartNoCookies);
+class Gallery {
+  constructor(container) {
+    this.elements = { container };
+    this.navigationOnClick = Boolean(
+      this.elements.container.dataset.mediaClickNav
+    );
+  }
+
+  init() {
+    Object.assign(this.elements, this.getElements());
+
+    this.eventHandlers = this.setupEventHandlers();
+    this.bindEvents();
+
+    this.state = this.setInitialState();
+    this.setIndicatorLabel();
+    this.hideMedia();
+    this.applyTransformation();
+    window.setTimeout(() => this.enableTransition());
+    this.preloadAdjacentImages();
+  }
+
+  getElements() {
+    return {
+      arrowNext: this.elements.container.querySelector(
+        selectors$9.mediaArrowNext
+      ),
+      arrowPrev: this.elements.container.querySelector(
+        selectors$9.mediaArrowPrev
+      ),
+      currentIndex: this.elements.container.querySelector(
+        selectors$9.mediaCurrent
+      ),
+      images: Array.from(
+        this.elements.container.querySelectorAll(selectors$9.mediaImages)
+      ),
+      liveRegionContent: this.elements.container.querySelector(
+        selectors$9.mediaLiveRegion
+      ),
+      galleryIndicator: this.elements.container.querySelector(
+        selectors$9.mediaIndicatorLabel
+      ),
+      mediaWrapper: this.elements.container.querySelectorAll(
+        selectors$9.mediaWrapper
+      ),
+      mediaStripWrapper: this.elements.container.querySelector(
+        selectors$9.mediaStripWrapper
+      ),
+    };
+  }
+
+  setupEventHandlers() {
+    return {
+      onArrowClick: this.onArrowClick.bind(this),
+      onKeyUp: this.onKeyUp.bind(this),
+      onImageClick: this.onImageClick.bind(this),
+    };
+  }
+
+  bindEvents() {
+    [this.elements.arrowNext, this.elements.arrowPrev].forEach((arrow) => {
+      arrow.addEventListener('click', this.eventHandlers.onArrowClick);
+    });
+
+    this.elements.container.addEventListener(
+      'keyup',
+      this.eventHandlers.onKeyUp
+    );
+
+    if (this.navigationOnClick) {
+      this.elements.images.forEach((image) => {
+        image.addEventListener('click', this.eventHandlers.onImageClick);
+      });
+    }
+  }
+
+  destroy() {
+    [this.elements.arrowNext, this.elements.arrowPrev].forEach((arrow) => {
+      arrow.removeEventListener('click', this.eventHandlers.onArrowClick);
+    });
+
+    this.elements.container.removeEventListener(
+      'keyup',
+      this.eventHandlers.onKeyUp
+    );
+
+    this.elements.images.forEach((image) => {
+      image.removeEventListener('click', this.eventHandlers.onImageClick);
+    });
+  }
+
+  setInitialState() {
+    const activeImage = this.elements.images.find((image) =>
+      image.classList.contains(classes$8.isActive)
+    );
+
+    return {
+      activeMediaImage: activeImage,
+      mediaId: Number(activeImage.dataset.mediaId),
+      mediaIndex: Number(activeImage.dataset.mediaIndex),
+      activeMediaTotalImages: this.elements.images.length,
+      useAriaHidden: true,
+    };
+  }
+
+  onArrowClick(event) {
+    event.preventDefault();
+    this.state.isNext = 'mediaArrowNext' in event.currentTarget.dataset;
+    this.goToAdjacentMedia();
+  }
+
+  onKeyUp(event) {
+    if (
+      event.key.toLowerCase() !== keyCodes.LEFT &&
+      event.key.toLowerCase() !== keyCodes.RIGHT
+    ) {
       return;
     }
 
-    this.extend(ajaxCart);
+    event.preventDefault();
+    this.state.isNext = event.key.toLowerCase() === keyCodes.RIGHT;
+    this.goToAdjacentMedia();
+  }
 
-    cart.on('change', function(event, state) {
-      $container.toggleClass(classes$10.cartEmpty, state.items.length === 0);
+  onImageClick(event) {
+    const imageClickedIndex = event.currentTarget.dataset.mediaIndex;
+    const activeImageIndex = this.elements.images.find((image) =>
+      image.classList.contains(classes$8.isActive)
+    ).dataset.mediaIndex;
+    this.state.isNext = imageClickedIndex > activeImageIndex;
+    if (imageClickedIndex !== activeImageIndex) {
+      this.goToAdjacentMedia();
+    }
+  }
+
+  goToAdjacentMedia() {
+    this.setMediaIndex();
+    this.setActiveMedia('mediaIndex');
+    this.state.mediaId = Number(this.state.activeMediaImage.dataset.mediaId);
+    this.renderGallery();
+  }
+
+  variantMediaSwitch(featuredMediaId) {
+    if (featuredMediaId === this.state.mediaId) return;
+    this.state.mediaId = featuredMediaId;
+    this.setActiveMedia('mediaId');
+    this.state.mediaIndex = Number(
+      this.state.activeMediaImage.dataset.mediaIndex
+    );
+    this.renderGallery();
+  }
+
+  cacheElement(name) {
+    this.elements[name] =
+      this.elements[name] ||
+      this.elements.container.querySelector(selectors$9[name]);
+  }
+
+  setActiveMedia(propertyQuery) {
+    this.state.activeMediaImage = this.elements.images.find(
+      (image) =>
+        Number(image.dataset[propertyQuery]) === this.state[propertyQuery]
+    );
+  }
+
+  setMediaIndex() {
+    this.state.mediaIndex = this.state.isNext
+      ? this.nextImage()
+      : this.previousImage();
+  }
+
+  nextImage() {
+    return this.state.mediaIndex === this.state.activeMediaTotalImages
+      ? 1
+      : this.state.mediaIndex + 1;
+  }
+
+  previousImage() {
+    return this.state.mediaIndex === 1
+      ? this.state.activeMediaTotalImages
+      : this.state.mediaIndex - 1;
+  }
+
+  preloadAdjacentImages() {
+    this.elements.images
+      .filter((image) =>
+        [this.nextImage(), this.previousImage()].includes(
+          Number(image.dataset.mediaIndex)
+        )
+      )
+      .forEach((image) => this.loadImage(image));
+  }
+
+  applyActiveClass() {
+    this.state.activeMediaImage.classList.add(classes$8.isActive);
+    this.loadImage(this.state.activeMediaImage);
+  }
+
+  hideMedia() {
+    if (!this.state.useAriaHidden) return;
+
+    this.elements.images.forEach((image) => {
+      const imageContainer = image.closest(selectors$9.mediaWrapper);
+      const focusableElements = imageContainer.querySelectorAll('button, a');
+
+      if (!image.classList.contains(classes$8.isActive)) {
+        image
+          .closest(selectors$9.mediaWrapper)
+          .setAttribute('aria-hidden', 'true');
+
+        focusableElements.forEach((element) =>
+          element.setAttribute('tabindex', '-1')
+        );
+        return;
+      }
+      imageContainer.removeAttribute('aria-hidden');
+      focusableElements.forEach((element) =>
+        element.removeAttribute('tabindex')
+      );
     });
   }
-});
 
-/*
+  getIndicatorText() {
+    const indicatorTextContent = this.elements.liveRegionContent.dataset
+      .mediaLiveregionMessage;
 
-Collection Template Section
---------------------------------------------------------------------------------
-Creates a staggered card grid for the collection template. Manages filters.
+    return indicatorTextContent
+      .replace('[index]', this.state.mediaIndex)
+      .replace('[indexTotal]', this.state.activeMediaTotalImages);
+  }
 
-*/
+  setIndicatorLabel() {
+    const indicatorText = this.getIndicatorText();
+    this.elements.galleryIndicator.setAttribute('aria-label', indicatorText);
+  }
 
-// Extensions
-// Libs
-var selectors$10 = {
-  filterBy: '#FilterBy',
-  sortBy: '#SortBy',
-  collectionImage: '.section-header-image'
+  updateLiveRegion() {
+    const indicatorText = this.getIndicatorText();
+
+    this.elements.liveRegionContent.setAttribute('aria-hidden', false);
+    this.elements.liveRegionContent.textContent = indicatorText;
+
+    setTimeout(() => {
+      this.elements.liveRegionContent.setAttribute('aria-hidden', true);
+    }, 2000);
+  }
+
+  loadImage(image) {
+    if (!image.getAttribute('src') && image.tagName === 'IMG') {
+      image.setAttribute('src', image.dataset.src);
+    }
+
+    if (!image.getAttribute('srcset') && image.tagName === 'IMG') {
+      image.setAttribute('srcset', image.dataset.srcset);
+    }
+  }
+
+  clearActiveClasses() {
+    this.elements.images.forEach((image) =>
+      image.classList.remove(classes$8.isActive)
+    );
+  }
+
+  renderCurrentIndex() {
+    this.elements.currentIndex.textContent = this.state.mediaIndex;
+  }
+
+  enableTransition() {
+    this.cacheElement('strip');
+    this.elements.strip.classList.add(classes$8.transitionReady);
+  }
+
+  applyTransformation() {
+    this.cacheElement('strip');
+
+    const transformationDistance = 100 * (this.state.mediaIndex - 1);
+    this.elements.strip.style.transform = `translateX(-${transformationDistance}%)`;
+  }
+
+  resetTransformation() {
+    this.cacheElement('strip');
+
+    this.elements.strip.classList.remove(classes$8.transitionReady);
+    this.elements.strip.style.transform = `translateX(0)`;
+  }
+
+  addAccessibilityAttr() {
+    this.elements.container.setAttribute(
+      'aria-roledescription',
+      theme.strings.mediaCarousel
+    );
+
+    this.elements.container.setAttribute(
+      'aria-label',
+      this.elements.container.dataset.label
+    );
+
+    this.elements.mediaStripWrapper.setAttribute('aria-live', 'polite');
+
+    this.elements.mediaWrapper.forEach((wrapper) => {
+      wrapper.setAttribute('role', 'group');
+      wrapper.setAttribute('aria-roledescription', theme.strings.mediaSlide);
+      wrapper.setAttribute('aria-label', wrapper.dataset.mediaLabel);
+    });
+  }
+
+  removeAccessibilityAttr() {
+    this.elements.container.removeAttribute('aria-roledescription');
+    this.elements.container.removeAttribute('aria-label');
+    this.elements.mediaWrapper.forEach((wrapper) => {
+      wrapper.removeAttribute('aria-roledescription');
+      wrapper.removeAttribute('aria-label');
+      wrapper.removeAttribute('role');
+    });
+    this.elements.images.forEach((image) => {
+      image.closest(selectors$9.mediaWrapper).removeAttribute('aria-hidden');
+    });
+    this.elements.mediaStripWrapper.removeAttribute('aria-live');
+  }
+
+  renderGallery() {
+    this.clearActiveClasses();
+    this.applyActiveClass();
+    this.hideMedia();
+    this.applyTransformation();
+    this.renderCurrentIndex();
+    this.setIndicatorLabel();
+    this.updateLiveRegion();
+    this.preloadAdjacentImages();
+  }
+}
+
+function Listeners() {
+  this.entries = [];
+}
+
+Listeners.prototype.add = function(element, event, fn) {
+  this.entries.push({ element: element, event: event, fn: fn });
+  element.addEventListener(event, fn);
 };
-var defaultSort = 'title-ascending';
-var queryParams = {};
 
-sections.register('collection-template', {
-  onLoad: function() {
-    var $container = (this.$container = $(this.container));
-    var $filterBy = $(selectors$10.filterBy, $container);
-    var $sortBy = $(selectors$10.sortBy, $container);
+Listeners.prototype.removeAll = function() {
+  this.entries = this.entries.filter(function(listener) {
+    listener.element.removeEventListener(listener.event, listener.fn);
+    return false;
+  });
+};
 
-    this.defaultSort = this.getDefaultSortValue();
-    this.extend(cardManager);
-    this.initParams();
+/**
+ * Returns a product JSON object when passed a product URL
+ * @param {*} url
+ */
 
-    $filterBy.on('change', this.onFilterChange.bind(this));
-    $sortBy.on('change', this.onSortChange.bind(this));
-  },
 
-  initParams: function() {
-    if (!location.search.length) return;
+/**
+ * Find a match in the project JSON (using a ID number) and return the variant (as an Object)
+ * @param {Object} product Product JSON object
+ * @param {Number} value Accepts Number (e.g. 6908023078973)
+ * @returns {Object} The variant object once a match has been successful. Otherwise null will be return
+ */
 
-    var aKeyValue;
-    var aCouples = location.search.substr(1).split('&');
 
-    for (var i = 0; i < aCouples.length; i++) {
-      aKeyValue = aCouples[i].split('=');
-      if (aKeyValue.length > 1) {
-        queryParams[decodeURIComponent(aKeyValue[0])] = decodeURIComponent(
-          aKeyValue[1]
-        );
+/**
+ * Convert the Object (with 'name' and 'value' keys) into an Array of values, then find a match & return the variant (as an Object)
+ * @param {Object} product Product JSON object
+ * @param {Object} collection Object with 'name' and 'value' keys (e.g. [{ name: "Size", value: "36" }, { name: "Color", value: "Black" }])
+ * @returns {Object || null} The variant object once a match has been successful. Otherwise null will be returned
+ */
+function getVariantFromSerializedArray(product, collection) {
+  _validateProductStructure(product);
+
+  // If value is an array of options
+  var optionArray = _createOptionArrayFromOptionCollection(product, collection);
+  return getVariantFromOptionArray(product, optionArray);
+}
+
+/**
+ * Find a match in the project JSON (using Array with option values) and return the variant (as an Object)
+ * @param {Object} product Product JSON object
+ * @param {Array} options List of submitted values (e.g. ['36', 'Black'])
+ * @returns {Object || null} The variant object once a match has been successful. Otherwise null will be returned
+ */
+function getVariantFromOptionArray(product, options) {
+  _validateProductStructure(product);
+  _validateOptionsArray(options);
+
+  var result = product.variants.filter(function(variant) {
+    return options.every(function(option, index) {
+      return variant.options[index] === option;
+    });
+  });
+
+  return result[0] || null;
+}
+
+/**
+ * Creates an array of selected options from the object
+ * Loops through the project.options and check if the "option name" exist (product.options.name) and matches the target
+ * @param {Object} product Product JSON object
+ * @param {Array} collection Array of object (e.g. [{ name: "Size", value: "36" }, { name: "Color", value: "Black" }])
+ * @returns {Array} The result of the matched values. (e.g. ['36', 'Black'])
+ */
+function _createOptionArrayFromOptionCollection(product, collection) {
+  _validateProductStructure(product);
+  _validateSerializedArray(collection);
+
+  var optionArray = [];
+
+  collection.forEach(function(option) {
+    for (var i = 0; i < product.options.length; i++) {
+      if (product.options[i].name.toLowerCase() === option.name.toLowerCase()) {
+        optionArray[i] = option.value;
+        break;
       }
     }
-  },
+  });
 
-  onSortChange: function() {
-    queryParams.sort_by = this.getSortValue();
-    if (queryParams.page) {
-      delete queryParams.page;
-    }
-    location.search = decodeURIComponent($.param(queryParams));
-  },
+  return optionArray;
+}
 
-  onFilterChange: function() {
-    this.filter = this.getFilterValue();
-    document.location.href = this.filter;
-  },
-
-  getSortValue: function() {
-    return $(selectors$10.sortBy).val() || this.defaultSort;
-  },
-
-  getDefaultSortValue: function() {
-    return $(selectors$10.sortBy, this.$container).val() || defaultSort;
-  },
-
-  getFilterValue: function() {
-    return $(selectors$10.filterBy, this.$container).val() || 'collections/all';
+/**
+ * Check if the product data is a valid JS object
+ * Error will be thrown if type is invalid
+ * @param {object} product Product JSON object
+ */
+function _validateProductStructure(product) {
+  if (typeof product !== 'object') {
+    throw new TypeError(product + ' is not an object.');
   }
-});
 
-/*
-
-Featured Blog Post Section
---------------------------------------------------------------------------------
-Creates a staggered card grid for the featured blog post section.
-
-*/
-
-// Extensions
-// Libs
-sections.register('featured-blog', {
-  onLoad: function() {
-    this.extend(cardManager);
+  if (Object.keys(product).length === 0 && product.constructor === Object) {
+    throw new Error(product + ' is empty.');
   }
-});
+}
 
-var product = {
-  validate: function(product) {
-    if (typeof product !== 'object' || typeof product.id !== 'number') {
-      throw Error(
-        'Please pass a valid Product object to the Product Controller'
+/**
+ * Validate the structure of the array
+ * It must be formatted like jQuery's serializeArray()
+ * @param {Array} collection Array of object [{ name: "Size", value: "36" }, { name: "Color", value: "Black" }]
+ */
+function _validateSerializedArray(collection) {
+  if (!Array.isArray(collection)) {
+    throw new TypeError(collection + ' is not an array.');
+  }
+
+  if (collection.length === 0) {
+    return [];
+  }
+
+  if (collection[0].hasOwnProperty('name')) {
+    if (typeof collection[0].name !== 'string') {
+      throw new TypeError(
+        'Invalid value type passed for name of option ' +
+          collection[0].name +
+          '. Value should be string.'
       );
     }
+  } else {
+    throw new Error(collection[0] + 'does not contain name key.');
+  }
+}
 
-    return $.extend({}, product);
-  },
+/**
+ * Validate the structure of the array
+ * It must be formatted as list of values
+ * @param {Array} collection Array of object (e.g. ['36', 'Black'])
+ */
+function _validateOptionsArray(options) {
+  if (Array.isArray(options) && typeof options[0] === 'object') {
+    throw new Error(options + 'is not a valid array of options.');
+  }
+}
 
-  getVariant: function(product, value) {
-    var variant;
+var selectors$11 = {
+  idInput: '[name="id"]',
+  optionInput: '[name^="options"]',
+  quantityInput: '[name="quantity"]',
+  propertyInput: '[name^="properties"]'
+};
 
-    if (typeof value === 'string' || typeof value === 'number') {
-      // If value is an id
-      variant = this._getVariantFromId(product, value);
-    } else if (typeof value === 'object' && typeof value.id === 'number') {
-      // If value is a variant object containing an id key
-      variant = this._getVariantFromId(product, value.id);
-    } else if (isArray(value)) {
-      // If value is an array of options
-      if (typeof value[0] === 'object') {
-        // If value is a collection of options with name and value keys
-        variant = this._getVariantFromOptionCollection(product, value);
-      } else {
-        // If value is an array of option values, ordered by index of array
-        variant = this._getVariantFromOptionArray(product, value);
-      }
-    }
+// Public Methods
+// -----------------------------------------------------------------------------
 
-    return variant;
-  },
+/**
+ * Returns a URL with a variant ID query parameter. Useful for updating window.history
+ * with a new URL based on the currently select product variant.
+ * @param {string} url - The URL you wish to append the variant ID to
+ * @param {number} id  - The variant ID you wish to append to the URL
+ * @returns {string} - The new url which includes the variant ID query parameter
+ */
 
-  optionArrayFromOptionCollection: function(product, collection) {
-    var optionArray = [];
 
-    collection.forEach(function(option) {
-      var index;
 
-      if (typeof option.name !== 'string') {
-        throw Error(
-          'Invalid value type passed for name of option ' +
-            index +
-            '. Value should be string.'
-        );
-      }
+/**
+ * Constructor class that creates a new instance of a product form controller.
+ *
+ * @param {Element} element - DOM element which is equal to the <form> node wrapping product form inputs
+ * @param {Object} product - A product object
+ * @param {Object} options - Optional options object
+ * @param {Function} options.onOptionChange - Callback for whenever an option input changes
+ * @param {Function} options.onQuantityChange - Callback for whenever an quantity input changes
+ * @param {Function} options.onPropertyChange - Callback for whenever a property input changes
+ * @param {Function} options.onFormSubmit - Callback for whenever the product form is submitted
+ */
+function ProductForm$1(element, product, options) {
+  this.element = element;
+  this.product = _validateProductObject(product);
 
-      index = findIndex(product.options, function(name) {
-        return name.toLowerCase() === option.name.toLowerCase();
-      });
+  options = options || {};
 
-      if (index === -1) {
-        throw Error('Invalid option name, ' + option.name);
-      }
+  this._listeners = new Listeners();
+  this._listeners.add(
+    this.element,
+    'submit',
+    this._onSubmit.bind(this, options)
+  );
 
-      optionArray[index] = option.value;
-    });
+  this.optionInputs = this._initInputs(
+    selectors$11.optionInput,
+    options.onOptionChange
+  );
 
-    return optionArray;
-  },
+  this.quantityInputs = this._initInputs(
+    selectors$11.quantityInput,
+    options.onQuantityChange
+  );
 
-  _getVariantFromId: function(product, id) {
-    return find(product.variants, { id: id });
-  },
+  this.propertyInputs = this._initInputs(
+    selectors$11.propertyInput,
+    options.onPropertyChange
+  );
+}
 
-  _getVariantFromOptionCollection: function(product, collection, closest) {
-    var optionArray = this.optionArrayFromOptionCollection(product, collection);
+/**
+ * Cleans up all event handlers that were assigned when the Product Form was constructed.
+ * Useful for use when a section needs to be reloaded in the theme editor.
+ */
+ProductForm$1.prototype.destroy = function() {
+  this._listeners.removeAll();
+};
 
-    return this._getVariantFromOptionArray(product, optionArray, closest);
-  },
+/**
+ * Getter method which returns the array of currently selected option values
+ *
+ * @returns {Array} An array of option values
+ */
+ProductForm$1.prototype.options = function() {
+  return _serializeOptionValues(this.optionInputs, function(item) {
+    var regex = /(?:^(options\[))(.*?)(?:\])/;
+    item.name = regex.exec(item.name)[2]; // Use just the value between 'options[' and ']'
+    return item;
+  });
+};
 
-  _getVariantFromOptionArray: function(product, options) {
-    return find(product.variants, function(variant) {
-      return options.every(function(option, index) {
-        return variant.options[index] === option;
-      });
-    });
+/**
+ * Getter method which returns the currently selected variant, or `null` if variant
+ * doesn't exist.
+ *
+ * @returns {Object|null} Variant object
+ */
+ProductForm$1.prototype.variant = function() {
+  return getVariantFromSerializedArray(this.product, this.options());
+};
+
+/**
+ * Getter method which returns a collection of objects containing name and values
+ * of property inputs
+ *
+ * @returns {Array} Collection of objects with name and value keys
+ */
+ProductForm$1.prototype.properties = function() {
+  var properties = _serializePropertyValues(this.propertyInputs, function(
+    propertyName
+  ) {
+    var regex = /(?:^(properties\[))(.*?)(?:\])/;
+    var name = regex.exec(propertyName)[2]; // Use just the value between 'properties[' and ']'
+    return name;
+  });
+
+  return Object.entries(properties).length === 0 ? null : properties;
+};
+
+/**
+ * Getter method which returns the current quantity or 1 if no quantity input is
+ * included in the form
+ *
+ * @returns {Array} Collection of objects with name and value keys
+ */
+ProductForm$1.prototype.quantity = function() {
+  return this.quantityInputs[0]
+    ? Number.parseInt(this.quantityInputs[0].value, 10)
+    : 1;
+};
+
+// Private Methods
+// -----------------------------------------------------------------------------
+ProductForm$1.prototype._setIdInputValue = function(value) {
+  var idInputElement = this.element.querySelector(selectors$11.idInput);
+
+  if (!idInputElement) {
+    idInputElement = document.createElement('input');
+    idInputElement.type = 'hidden';
+    idInputElement.name = 'id';
+    this.element.appendChild(idInputElement);
+  }
+
+  idInputElement.value = value.toString();
+};
+
+ProductForm$1.prototype._onSubmit = function(options, event) {
+  event.dataset = this._getProductFormEventData();
+
+  if (event.dataset.variant) {
+    this._setIdInputValue(event.dataset.variant.id);
+  }
+
+  if (options.onFormSubmit) {
+    options.onFormSubmit(event);
   }
 };
 
-/*
+ProductForm$1.prototype._onFormEvent = function(cb) {
+  if (typeof cb === 'undefined') {
+    return Function.prototype;
+  }
 
-Product Display Extension
---------------------------------------------------------------------------------
-Manages the state of the product selection display.
-
-
-Events
-------------
-
-Name: variant_change
-Description: Fired whenever a new variant is selected
-Payload: { object } Product object of the item being selected
-Payload: { object } Variant object resulted from options selection
-
-Name: variant_change_undefined
-Description: Fired when the product options selected result in a undefined variant
-Payload: { object } Product object of the item being selected
-Payload: { array } Collection of form option input names and values
-
-Name: variant_change_successful
-Description: Fired when the product options selected result in a variant
-Payload: { object } Product object of the item being selected
-Payload: { object } Variant object resulted from options selection
-
-Name: variant_add_to_cart
-Description: Fired when a product variant is added to the cart
-Payload: { object } Product object of the item being added to the cart
-Payload: { object } Variant object of the item being added to the cart
-Payload: { object } Serialized form data being submitted to the cart API
-
-Name: variant_add_to_cart_successful
-Description: Fired when a product variant has been added to the cart successfully
-Payload: { object } Product object of the item being added to the cart
-Payload: { object } Variant object of the item being added to the cart
-Payload: { object } Serialized form data being submitted to the cart API
-
-Name: variant_add_to_cart_fail
-Description: Fired when a product variant has failed to be added to the cart
-Payload: { object } Product object of the item being added to the cart
-Payload: { object } Variant object of the item being added to the cart
-Payload: { string } Error string
-
-*/
-
-var classes$11 = {
-  productPriceSale: 'product__price--sale',
-  productPriceUnitUnavailable: 'product-price-unit--unavailable',
-  productNotificationSuccess: 'product__notification--success',
-  productNotificationError: 'product__notification--error',
-  buttonTransition: 'btn--to-secondary-transitioned',
-  ajaxCartToggle: 'ajax-cart__toggle',
-  hide: 'hide',
-  lazyPreload: 'lazypreload'
+  return function(event) {
+    event.dataset = this._getProductFormEventData();
+    cb(event);
+  }.bind(this);
 };
 
-var selectors$12 = {
-  productForm: '.product-form',
-  selectorWrapper: '.product-form__item',
-  ajaxCartToggle: '.ajax-cart__toggle',
-  shopifyPaymentButton: '.shopify-payment-button',
+ProductForm$1.prototype._initInputs = function(selector, cb) {
+  var elements = Array.prototype.slice.call(
+    this.element.querySelectorAll(selector)
+  );
 
+  return elements.map(
+    function(element) {
+      this._listeners.add(element, 'change', this._onFormEvent(cb));
+      return element;
+    }.bind(this)
+  );
+};
+
+ProductForm$1.prototype._getProductFormEventData = function() {
+  return {
+    options: this.options(),
+    variant: this.variant(),
+    properties: this.properties(),
+    quantity: this.quantity()
+  };
+};
+
+function _serializeOptionValues(inputs, transform) {
+  return inputs.reduce(function(options, input) {
+    if (
+      input.checked || // If input is a checked (means type radio or checkbox)
+      (input.type !== 'radio' && input.type !== 'checkbox') // Or if its any other type of input
+    ) {
+      options.push(transform({ name: input.name, value: input.value }));
+    }
+
+    return options;
+  }, []);
+}
+
+function _serializePropertyValues(inputs, transform) {
+  return inputs.reduce(function(properties, input) {
+    if (
+      input.checked || // If input is a checked (means type radio or checkbox)
+      (input.type !== 'radio' && input.type !== 'checkbox') // Or if its any other type of input
+    ) {
+      properties[transform(input.name)] = input.value;
+    }
+
+    return properties;
+  }, {});
+}
+
+function _validateProductObject(product) {
+  if (typeof product !== 'object') {
+    throw new TypeError(product + ' is not an object.');
+  }
+
+  if (typeof product.variants[0].options === 'undefined') {
+    throw new TypeError(
+      'Product object is invalid. Make sure you use the product object that is output from {{ product | json }} or from the http://[your-product-url].js route'
+    );
+  }
+
+  return product;
+}
+
+const selectors$12 = {
+  drawerContent: '[data-store-availability-drawer-content]',
+  drawerOutput: '[data-store-availability-drawer-output]',
+  errorTemplate: '[data-store-availability-error-template]',
+  mainContent: '[data-store-availability-main-content]',
+  drawerProductTitle: '[data-store-availability-drawer-product-title]',
+  drawerVariantTitleWrapper:
+    '[data-store-availability-drawer-variant-title-wrapper]',
+  openDrawer: '[data-store-availability-open-drawer]',
+  refreshList: '[data-store-availability-refresh-list]',
+};
+
+const classes$10 = {
+  hidden: 'hidden',
+};
+
+class StoreAvailability {
+  constructor(container, options) {
+    this.container = container;
+    this.errorTemplate = container.querySelector(selectors$12.errorTemplate);
+    this.productTitle = this.container.getAttribute('data-product-title');
+    this.hasOnlyDefaultVariant =
+      this.container.getAttribute('data-has-only-default-variant') === 'true';
+    this.options = {
+      variant: null,
+      variantLabels: [],
+    };
+    Object.assign(this.options, options);
+    this._bindEvents();
+  }
+
+  hide() {
+    this.container.innerHTML = '';
+  }
+
+  updateVariant(variantOptions) {
+    Object.assign(this.options, variantOptions);
+  }
+
+  updateContent(variantId, variantOptions) {
+    const variantSectionUrl = `${this.container.getAttribute(
+      'data-base-url'
+    )}/variants/${variantId}?section_id=store-availability`;
+    this.variantOptions = variantOptions;
+
+    fetch(variantSectionUrl)
+      .then((response) => {
+        return response.text();
+      })
+      .then((html) => {
+        this._render(html);
+      })
+      .catch(() => {
+        this._renderError();
+      });
+  }
+
+  _bindEvents() {
+    this.container.addEventListener('click', this._onClickContainer.bind(this));
+  }
+
+  _getStorePopup() {
+    return window.popups.find((popup) => popup.name === 'store-availability');
+  }
+
+  _onClickContainer(event) {
+    const refreshList = event.target.closest(selectors$12.refreshList);
+    const openDrawer = event.target.closest(selectors$12.openDrawer);
+
+    if (refreshList && this.options.variant.available) {
+      this.updateContent(this.options.id, this.options.options);
+    }
+
+    const storePopup = this._getStorePopup();
+
+    if (openDrawer && storePopup) {
+      storePopup.openPopup({
+        currentTarget: openDrawer,
+      });
+    }
+  }
+
+  _render(html) {
+    const parser = new DOMParser();
+    const htmlDocument = parser.parseFromString(html, 'text/html');
+    const mainContent = htmlDocument.documentElement.querySelector(
+      selectors$12.mainContent
+    );
+
+    if (!mainContent) return;
+
+    const drawerContent = htmlDocument.documentElement.querySelector(
+      selectors$12.drawerContent
+    );
+
+    const mainContentHTML = mainContent.content.firstElementChild.cloneNode(
+      true
+    );
+
+    this.container.innerHTML = '';
+    this.container.appendChild(mainContentHTML);
+
+    const storePopup = this._getStorePopup();
+
+    if (storePopup.elements.popup) {
+      this._updateDrawer(drawerContent);
+    }
+  }
+
+  _renderError() {
+    const errorHTML = this.errorTemplate.content.firstElementChild.cloneNode(
+      true
+    );
+    this.container.innerHTML = '';
+    this.container.appendChild(errorHTML);
+  }
+
+  _hideVariantTitle() {
+    this.drawerVariantTitleWrapper.classList.add(classes$10.hidden);
+  }
+
+  _updateDrawer(html) {
+    const fragment = document.createDocumentFragment();
+    const storePopup = this._getStorePopup();
+    const drawerContainer = storePopup.elements.popup;
+    this.drawerOutput = drawerContainer.querySelector(selectors$12.drawerOutput);
+
+    this.drawerProductTitle = drawerContainer.querySelector(
+      selectors$12.drawerProductTitle
+    );
+
+    this.drawerVariantTitleWrapper = drawerContainer.querySelector(
+      selectors$12.drawerVariantTitleWrapper
+    );
+
+    if (this.hasOnlyDefaultVariant) {
+      this._hideVariantTitle();
+    }
+
+    this.drawerProductTitle.textContent = this.productTitle;
+
+    if (this.options.variantLabels.length > 0) {
+      this.variantOptions.forEach((variantOption, index) => {
+        const variantRow = fragment.appendChild(document.createElement('div'));
+        const variantTitle = variantRow.appendChild(
+          document.createElement('span')
+        );
+        variantTitle.textContent = this.options.variantLabels[index];
+        variantTitle.className = 'store-availability-variant__label';
+        const variantValue = variantRow.appendChild(
+          document.createElement('span')
+        );
+        variantValue.textContent = variantOption;
+      });
+    }
+
+    this.drawerVariantTitleWrapper.innerHTML = '';
+    this.drawerVariantTitleWrapper.appendChild(fragment);
+
+    this.drawerOutput.innerHTML = '';
+    this.drawerOutput.appendChild(html);
+  }
+}
+
+const attributes$1 = {
+  dataQuantitySelectorIncrease: 'data-quantity-selector-increase',
+};
+
+const selectors$10 = {
+  addToCart: '[data-add-to-cart]',
+  addToCartText: '[data-add-to-cart-text]',
+  cartCountBubble: '[data-cart-count-bubble]',
+  cartCount: '[data-cart-count]',
+  cartPriceBubble: '[data-cart-price-bubble]',
+  errorMessageWrapper: '[data-error-message-wrapper]',
+  errorMessage: '[data-error-message]',
+  price: '[data-price]',
+  productForm: '[data-product-form]',
   productJSON: '[data-product-json]',
-  optionInputs: '[data-option-input]',
-  masterSelect: '[data-master-select]',
-  variantMediaImage: '[data-variant-media-image]',
-  variantMediaToggleHide: '[data-variant-media-toggle-hide]',
-  productPrice: '[data-product-price]',
+  productMasterSelect: '[data-product-master-select]',
+  productPolicies: '[data-product-policies]',
   regularPrice: '[data-regular-price]',
-  compareAtPrice: '[data-compare-price]',
+  productSuccessMessage: '[data-product-success-message]',
+  productStatus: '[data-product-status]',
+  salePrice: '[data-sale-price]',
   unitPrice: '[data-unit-price]',
   unitPriceBaseUnit: '[data-unit-price-base-unit]',
-  unitPriceContainer: '[data-unit-price-container]',
-  submitButton: '[data-cart-submit]',
-  submitButtonPrimaryText: '[data-cart-primary-submit-text]',
-  submitButtonSecondaryText: '[data-cart-secondary-submit-text]',
-  notification: '[data-cart-notification]',
-  shopifyXr: '[data-shopify-xr]'
+  quantityInput: '[data-quantity-input]',
+  quantityInputWrapper: '[data-quantity-input-wrapper]',
+  quantitySelectors: '[data-quantity-selector]',
+  quantitySelectorIncrease: '[data-quantity-selector-increase]',
+  storeAvailability: '[data-store-availability]',
 };
 
-var productDisplay = {
-  init: function() {
-    var $productJSON = $(selectors$12.productJSON, this.container);
+const classes$9 = {
+  hidden: 'hidden',
+  formInputError: 'form__input-wrapper--error',
+  productOnSale: 'price--on-sale',
+  productSoldOut: 'price--sold-out',
+  productUnitAvailable: 'price--unit-available',
+  productUnavailable: 'price--unavailable',
+  visuallyHidden: 'visually-hidden',
+};
 
-    if ($productJSON.length === 0) return;
+class ProductForm$$1 {
+  constructor(container) {
+    this.elements = { container };
+  }
 
-    this.product = JSON.parse($productJSON.html());
-    this.variant = product.getVariant(
-      this.product,
-      this.$container.data('variant-id')
-    );
+  init() {
+    this.eventHandlers = {};
+    Object.assign(this.elements, this._getElements());
 
-    this._formatVariantSelectors();
+    if (!this.elements.productForm) return;
 
-    this.on('submit', selectors$12.productForm, this._addItemToCart.bind(this));
-    this.one(
-      'focus',
-      selectors$12.optionInputs,
-      this._preloadVariantMediaImages.bind(this)
-    );
-    this.on(
-      'change.variantController',
-      selectors$12.optionInputs,
-      this.update.bind(this)
-    );
+    this.productId = this.elements.productForm.dataset.productId;
 
-    this.document().on(
-      'click',
-      selectors$12.ajaxCartToggle,
-      this._resetAddToCartButton.bind(this)
-    );
+    if (this.elements.productJSON) {
+      const productJSON = JSON.parse(this.elements.productJSON.innerHTML);
+      this._initProductForm(productJSON);
 
-    this.window().on('online', this._updateOnlineStatus);
-    this.window().on('offline', this._updateOfflineStatus);
-  },
+      if (this.elements.storeAvailability && this.productForm) {
+        const variant = this.productForm.variant();
+        const variantLabels = productJSON.options.map(
+          (variantObj) => variantObj.name
+        );
+        this.storeAvailability = new StoreAvailability(
+          this.elements.storeAvailability,
+          {
+            variant,
+            variantLabels,
+          }
+        );
 
-  update: function() {
-    var $inputs = $(selectors$12.optionInputs, this.$container);
-    var options = $inputs.serializeArray();
-    var variant = product.getVariant(this.product, options);
-
-    // If the variant we tried to find with the selected options does not exist
-    // then modify and clone the currently selected variant and transform it
-    // to an 'unavailable' product variant object.
-    if (typeof variant === 'undefined') {
-      this.trigger('variant_change_undefined', [this.product, options]);
-
-      variant = $.extend({}, this.variant); // Clone variant because we are going to edit it
-      variant.isUndefined = true;
-      variant.available = false;
-      variant.options = product.optionArrayFromOptionCollection(
-        this.product,
-        options
-      );
+        if (variant) {
+          this._updateStoreAvailability(variant);
+        }
+      }
     } else {
-      this.trigger('variant_change_successful', [this.product, variant]);
-    }
-
-    this.variant = variant;
-
-    // MorphDOM - Here is the old container, and the new container, only update
-    // the DOM with things that have changed.
-    morphdom(this.$container[0], this._updatedContainer(this.variant));
-
-    this.trigger('variant_change', [this.product, variant]);
-  },
-
-  _preloadVariantMediaImages: function() {
-    $(selectors$12.variantMediaImage, this.$container).addClass(
-      classes$11.lazyPreload
-    );
-  },
-
-  // The padding on the left side of the variant select's needs to be set
-  // to the same width as the option label. This can only be done when the main
-  // stylesheet has been downloaded, so we use utils.promiseStylesheet()
-  _formatVariantSelectors: function() {
-    utils.promiseStylesheet().then(
-      function() {
-        $(selectors$12.selectorWrapper, this.$container).each(function() {
-          var $wrapper = $(this);
-          var $label = $wrapper.find('label');
-          var $input = $wrapper.find('select, input');
-
-          $input.css({
-            'padding-left': $label.outerWidth(),
-            opacity: 1
-          });
+      this._getProductJSON(this.elements.productForm.dataset.productHandle)
+        .then((product) => {
+          this._initProductForm(product);
+        })
+        .catch((error) => {
+          throw new Error(error);
         });
-      }.bind(this)
+    }
+  }
+
+  destroy() {
+    const hasQuantitySelector = Boolean(
+      this.elements.container.dataset.showQuantitySelector
     );
-  },
 
-  // Clone the current version of the container and update elements with jQuery
-  // according to the new variant values. This is an alternative to having a
-  // duplicate Handlebars template that you would pass the cart object to
-  // generate the updated container.
-  _updatedContainer: function(variant) {
-    var $container = this.$container.clone();
+    if (!hasQuantitySelector) return;
 
-    $(selectors$12.masterSelect, $container).val(variant.id);
-
-    this._updateInputValues(variant, $container);
-    this._updateProductPrices(variant, $container);
-    this._updateVariantMediaImage(variant, $container);
-    this._toggleVariantMediaHide(variant, $container);
-    this._updateCartButtonState(variant, $container);
-
-    return $container[0];
-  },
-
-  _updateInputValues: function(variant, $container) {
-    $(selectors$12.optionInputs, $container).each(function(index) {
-      $(this).val(variant.options[index]);
+    this.elements.quantitySelectors.forEach((quantitySelector) => {
+      quantitySelector.removeEventListener(
+        'click',
+        this.eventHandlers.onQuantitySelectorClick
+      );
     });
-  },
 
-  _updateCartButtonState: function(variant, $container) {
-    var text;
+    if (!this.hasInstantQuantity) return;
 
-    if (variant.isUndefined) {
-      text = theme.strings.unavailable;
+    this.elements.quantityInput.removeEventListener(
+      'input',
+      this.eventHandlers.onQuantityInputTextChanged
+    );
+
+    this.elements.quantityInput.removeEventListener(
+      'removedFromCart',
+      this.eventHandlers.onProductRemovedFromCart
+    );
+  }
+
+  _hideInstantQuantity() {
+    if (!this.hasInstantQuantity || !this.elements.quantityInputWrapper) return;
+
+    this.elements.quantityInput.value = 1;
+
+    this._hideErrorMessage();
+
+    this.elements.quantityInputWrapper.classList.add(classes$9.hidden);
+    this.elements.addToCart.classList.remove(classes$9.hidden);
+    this.elements.addToCart.focus();
+  }
+
+  _initProductForm(product) {
+    this.productForm = new ProductForm$1(
+      this.elements.productForm,
+      product,
+      {
+        onOptionChange: this._onFormOptionChange.bind(this),
+        onFormSubmit: this._onFormSubmit.bind(this),
+        onQuantityChange: this._onQuantityChange.bind(this),
+      }
+    );
+    this._setupEventListeners();
+  }
+
+  _getElements() {
+    return {
+      addToCart: this.elements.container.querySelector(selectors$10.addToCart),
+      addToCartText: this.elements.container.querySelector(selectors$10.addToCart),
+      cartPriceBubble: document.querySelector(selectors$10.cartPriceBubble),
+      errorMessageWrapper: this.elements.container.querySelector(
+        selectors$10.errorMessageWrapper
+      ),
+      errorMessageElement: this.elements.container.querySelector(
+        selectors$10.errorMessage
+      ),
+      masterSelect: this.elements.container.querySelector(
+        selectors$10.productMasterSelect
+      ),
+      productForm: this.elements.container.querySelector(selectors$10.productForm),
+      productJSON: this.elements.container.querySelector(selectors$10.productJSON),
+      productPolicies: this.elements.container.querySelector(
+        selectors$10.productPolicies
+      ),
+      productStatus: this.elements.container.querySelector(
+        selectors$10.productStatus
+      ),
+      priceContainer: this.elements.container.querySelector(selectors$10.price),
+      regularPrice: this.elements.container.querySelectorAll(
+        selectors$10.regularPrice
+      ),
+      salePrice: this.elements.container.querySelector(selectors$10.salePrice),
+      successMessage: this.elements.container.querySelector(
+        selectors$10.productSuccessMessage
+      ),
+      quantityInputWrapper: this.elements.container.querySelector(
+        selectors$10.quantityInputWrapper
+      ),
+      quantityInput: this.elements.container.querySelector(
+        selectors$10.quantityInput
+      ),
+      quantitySelectors: this.elements.container.querySelectorAll(
+        selectors$10.quantitySelectors
+      ),
+      quantitySelectorIncrease: this.elements.container.querySelector(
+        selectors$10.quantitySelectorIncrease
+      ),
+      unitPrice: this.elements.container.querySelector(selectors$10.unitPrice),
+      unitPriceBaseUnit: this.elements.container.querySelector(
+        selectors$10.unitPriceBaseUnit
+      ),
+      storeAvailability: this.elements.container.querySelector(
+        selectors$10.storeAvailability
+      ),
+    };
+  }
+
+  _getEventHandlers() {
+    return {
+      onProductRemovedFromCart: this._hideInstantQuantity.bind(this),
+      onQuantitySelectorClick: this._onQuantitySelectorClick.bind(this),
+      onQuantityInputTextChanged: debounce(() => {
+        this._updateCartQuantity();
+      }, 1000),
+    };
+  }
+
+  _setupEventListeners() {
+    if (!this.elements.container.dataset.showQuantitySelector) return;
+
+    this.eventHandlers = this._getEventHandlers();
+
+    this.hasInstantQuantity = Boolean(
+      this.elements.quantityInputWrapper.dataset.quantityInputInstant
+    );
+
+    this.elements.quantitySelectors.forEach((quantitySelector) => {
+      quantitySelector.addEventListener(
+        'click',
+        this.eventHandlers.onQuantitySelectorClick
+      );
+    });
+
+    if (!this.hasInstantQuantity) return;
+
+    this.elements.quantityInput.addEventListener(
+      'input',
+      this.eventHandlers.onQuantityInputTextChanged
+    );
+
+    this.elements.quantityInput.addEventListener(
+      'removedFromCart',
+      this.eventHandlers.onProductRemovedFromCart
+    );
+  }
+
+  _getProductJSON(handle) {
+    const themeRoot = theme.rootUrl === '/' ? '' : theme.rootUrl;
+
+    return window
+      .fetch(`${themeRoot}/products/${handle}.js`)
+      .then((response) => {
+        return response.json();
+      });
+  }
+
+  _onFormSubmit(event) {
+    event.preventDefault();
+
+    // we need the LIVE addToCart element here
+    const addToCart = this.elements.container.querySelector(
+      selectors$10.addToCart
+    );
+
+    if (addToCart.hasAttribute('aria-disabled')) return;
+
+    if (this._quantityIsInvalid()) return;
+
+    this._addItemToCart();
+  }
+
+  _quantityIsInvalid() {
+    if (
+      this.elements.quantityInput &&
+      (parseInt(this.elements.quantityInput.value, 10) <= 0 ||
+        this.elements.quantityInput.value === '')
+    ) {
+      this._showErrorMessage(theme.strings.quantityMinimumMessage);
+      return true;
+    }
+
+    return false;
+  }
+
+  _showInstantQuantity(result) {
+    if (!this.hasInstantQuantity || !this.elements.quantityInputWrapper) return;
+
+    this.elements.quantityInput.dataset.quantityInputKey = result.key;
+    this.elements.quantityInput.value = result.quantity;
+
+    this.elements.addToCart.classList.add(classes$9.hidden);
+    this.elements.quantityInputWrapper.classList.remove(classes$9.hidden);
+
+    if (!this.elements.quantityInput) return;
+    this.elements.quantityInput.focus();
+  }
+
+  _addItemToCart() {
+    this._hideErrorMessage();
+    this._toggleSuccessMessage(true);
+
+    addItemFromForm(this.elements.productForm)
+      .then((result) => {
+        this._toggleSuccessMessage(false, this._getSuccessMessage());
+        this._showInstantQuantity(result);
+        if (!window.carts.length) this._onCartUpdated();
+        this.isUpdatingCart = false;
+
+        document.dispatchEvent(new CustomEvent('productAddedToCart'));
+
+        window.carts.forEach((cart) => {
+          cart.onCartUpdated(this.productId);
+        });
+
+        theme.cartQuantity.updateQuantityInputElements(
+          result.key,
+          result.quantity
+        );
+        const liveRegionText = this._getQuantityUpdatedText(
+          result.quantity,
+          true
+        );
+        this._updateLiveRegion(liveRegionText);
+      })
+      .catch((error) => {
+        this._handleProductError(error);
+        this.isUpdatingCart = false;
+      });
+  }
+
+  _getSuccessMessage() {
+    const quantity = this.elements.quantityInput
+      ? this.elements.quantityInput.value
+      : 1;
+
+    return parseInt(quantity, 10) > 1
+      ? theme.strings.itemAddedToCartMulti
+      : theme.strings.itemAddedToCartSingle;
+  }
+
+  _toggleSuccessMessage(hideMessage, message = '') {
+    if (!this.elements.successMessage) return;
+
+    this.elements.successMessage.textContent = message;
+    this.elements.successMessage.classList.toggle(classes$9.hidden, hideMessage);
+  }
+
+  _onCartUpdated() {
+    getState()
+      .then((cart) => {
+        this._updateCartPriceBubble(cart.total_price);
+        this._updateCartCountBubble(cart.item_count);
+        theme.cartQuantity.updateLocalCartState(cart, this.productId);
+      })
+      .catch((error) => {
+        throw new Error(error);
+      });
+  }
+
+  _updateCartPriceBubble(price) {
+    if (!this.elements.cartPriceBubble) return;
+
+    this.elements.cartPriceBubble.innerText = this._formatMoney(price);
+  }
+
+  _updateCartCountBubble(itemCount) {
+    this.cartCountBubbles =
+      this.cartCountBubbles ||
+      document.querySelectorAll(selectors$10.cartCountBubble);
+    this.cartCounts =
+      this.cartCounts || document.querySelectorAll(selectors$10.cartCount);
+
+    this.cartCounts.forEach(
+      (cartCount) => (cartCount.innerText = itemCount > 99 ? '99+' : itemCount)
+    );
+    this.cartCountBubbles.forEach((countBubble) =>
+      countBubble.classList.toggle(classes$9.hidden, itemCount === 0)
+    );
+  }
+
+  _handleProductError(error) {
+    error
+      .json()
+      .then((message) => {
+        const errorMessage = message.description
+          ? message.description
+          : theme.strings.cartError;
+
+        this._showErrorMessage(errorMessage);
+      })
+      .catch((message) => {
+        throw message;
+      });
+  }
+
+  _getQuantityErrorMessage(item) {
+    const errorMessage = theme.strings.quantityError;
+
+    return errorMessage
+      .replace('[quantity]', item.quantity)
+      .replace('[title]', item.title);
+  }
+
+  _showErrorMessage(errorMessage) {
+    if (
+      !this.elements.errorMessageElement ||
+      !this.elements.errorMessageWrapper
+    )
+      return;
+
+    this.elements.errorMessageElement.innerHTML = errorMessage;
+    this.elements.errorMessageWrapper.classList.remove(classes$9.hidden);
+    this.elements.errorMessageWrapper.setAttribute('aria-hidden', true);
+    this.elements.errorMessageWrapper.removeAttribute('aria-hidden');
+
+    if (!this.elements.quantityInputWrapper || this.hasInstantQuantity) return;
+    this.elements.quantityInputWrapper.classList.add(classes$9.formInputError);
+  }
+
+  _hideErrorMessage() {
+    if (!this.elements.errorMessageWrapper) return;
+
+    this.elements.errorMessageWrapper.classList.add(classes$9.hidden);
+
+    if (!this.elements.quantityInputWrapper || this.hasInstantQuantity) return;
+
+    this.elements.quantityInputWrapper.classList.remove(classes$9.formInputError);
+  }
+
+  _onFormOptionChange(event) {
+    const variant = event.dataset.variant;
+
+    this._updateMasterSelect(variant);
+    this._hideErrorMessage();
+    this._toggleSuccessMessage(true);
+    this._updatePrice(variant);
+    this._updateProductPolicies(variant);
+    this._updateAddToCart(variant);
+    this._updateVariantName(variant);
+    this._hideInstantQuantity();
+    this._updateStoreAvailability(variant);
+
+    const liveRegionText = this._getVariantUpdatedText(variant);
+    this._updateLiveRegion(liveRegionText);
+
+    this._fireEvent('formOptionChanged', { variant });
+  }
+
+  _fireEvent(eventName, data) {
+    this.elements.container.dispatchEvent(
+      new window.CustomEvent(eventName, {
+        detail: data,
+      })
+    );
+  }
+
+  _updateVariantName(variant) {
+    if (!variant || !variant.name) return;
+
+    this.elements.productForm.dataset.variantName = variant.name;
+  }
+
+  _updateMasterSelect(variant) {
+    if (!variant || !this.elements.masterSelect) return;
+
+    this.elements.masterSelect.value = variant.id;
+  }
+
+  _onQuantityChange() {
+    this._hideErrorMessage();
+    this._toggleSuccessMessage(true);
+  }
+
+  _calculateNewInputQuantity(currentQuantity, isIncrement) {
+    const minimum = this.hasInstantQuantity ? 0 : 1;
+    const result = isIncrement ? currentQuantity + 1 : currentQuantity - 1;
+
+    return Math.max(minimum, result);
+  }
+
+  _onQuantitySelectorClick(event) {
+    if (this.isUpdatingCart) return;
+
+    this._hideErrorMessage();
+
+    const isIncrement = event.currentTarget.hasAttribute(
+      attributes$1.dataQuantitySelectorIncrease
+    );
+
+    const quantityInput = this.elements.container.querySelector(
+      selectors$10.quantityInput
+    );
+    const currentQuantity = parseInt(quantityInput.value, 10);
+
+    const newQuantity = this._calculateNewInputQuantity(
+      currentQuantity,
+      isIncrement
+    );
+
+    quantityInput.value = newQuantity;
+
+    if (this.hasInstantQuantity) {
+      clearTimeout(this.timeout);
+
+      this.timeout = setTimeout(() => {
+        this.isUpdatingCart = true;
+        this._updateCartQuantity();
+      }, 500);
+    }
+  }
+
+  _updateCartQuantity() {
+    const cartKey = this.elements.quantityInput.dataset.quantityInputKey;
+    if (!cartKey) return;
+    const [variantId] = cartKey.split(':');
+
+    const newQuantity = parseInt(this.elements.quantityInput.value, 10);
+
+    updateItem(cartKey, { quantity: newQuantity }).then((state) => {
+      this.isUpdatingCart = false;
+      if (!window.carts.length) this._onCartUpdated();
+
+      window.carts.forEach((cart) => {
+        cart.onCartUpdated(this.productId);
+      });
+      theme.cartQuantity.updateQuantityInputElements(cartKey, newQuantity);
+
+      const liveRegionText = this._getQuantityUpdatedText(newQuantity);
+      this._updateLiveRegion(liveRegionText);
+      document.dispatchEvent(new CustomEvent('productAddedToCart'));
+
+      const updatedItem = state.items.find((item) => item.key === cartKey);
+
+      const totalQuantity = state.items.reduce((total, currentItem) => {
+        return currentItem.id === Number(variantId)
+          ? total + currentItem.quantity
+          : total;
+      }, 0);
+
+      if (newQuantity > totalQuantity) {
+        this.elements.quantityInput.value = totalQuantity;
+        this.elements.quantityInput.focus();
+        this._showErrorMessage(this._getQuantityErrorMessage(updatedItem));
+      }
+
+      if (newQuantity) return;
+      this._hideInstantQuantity();
+    });
+  }
+
+  _updatePrice(variant) {
+    if (!this.elements.priceContainer) return;
+
+    this.elements.priceContainer.classList.remove(
+      classes$9.productUnavailable,
+      classes$9.productOnSale,
+      classes$9.productUnitAvailable,
+      classes$9.productSoldOut
+    );
+
+    this.elements.priceContainer.removeAttribute('aria-hidden');
+    // product unavailable
+    if (!variant) {
+      this.elements.priceContainer.classList.add(classes$9.productUnavailable);
+      this.elements.priceContainer.setAttribute('aria-hidden', true);
+      return;
+    }
+    // sold out
+    if (!variant.available) {
+      this.elements.priceContainer.classList.add(classes$9.productSoldOut);
+    }
+    // on sale
+    if (variant.compare_at_price > variant.price) {
+      this._renderOnSalePrice(variant);
     } else {
-      text = variant.available
-        ? theme.strings.addToCart
-        : theme.strings.soldOut;
+      this._renderRegularPrice(variant);
     }
+    this._updateUnitPrice(variant);
+  }
 
-    this._resetAddToCartButton($container);
+  _renderOnSalePrice(variant) {
+    this.elements.regularPrice.forEach((price) => {
+      price.innerHTML = this._formatMoney(variant.compare_at_price);
+    });
 
-    if (variant.available) {
-      $(selectors$12.shopifyPaymentButton, $container).show();
-    } else {
-      $(selectors$12.shopifyPaymentButton, $container).hide();
-    }
+    if (!this.elements.salePrice) return;
+    this.elements.salePrice.innerHTML = this._formatMoney(variant.price);
+    this.elements.priceContainer.classList.add(classes$9.productOnSale);
+  }
 
-    $(selectors$12.submitButton, $container)
-      .prop('disabled', !variant.available)
-      .attr('aria-label', text);
+  _renderRegularPrice(variant) {
+    this.elements.regularPrice.forEach((price) => {
+      price.innerHTML = this._formatMoney(variant.price);
+    });
+  }
 
-    $(selectors$12.submitButtonPrimaryText, $container).text(text);
-  },
+  _updateUnitPrice(variant) {
+    if (
+      !variant.unit_price ||
+      !this.elements.unitPrice ||
+      !this.elements.unitPriceBaseUnit
+    )
+      return;
 
-  _updateProductPrices: function(variant, $container) {
-    var productPrice = variant.price;
-    var comparePrice = variant.compare_at_price;
-
-    $(selectors$12.regularPrice, $container).html(
-      currency.formatMoney(productPrice, theme.moneyFormat)
+    this.elements.unitPrice.innerHTML = this._formatMoney(
+      variant.unit_price,
+      theme.moneyFormat
     );
+    this.elements.unitPriceBaseUnit.innerText = this._getBaseUnit(variant);
+    this.elements.priceContainer.classList.add(classes$9.productUnitAvailable);
+  }
 
-    $(selectors$12.compareAtPrice, $container).html(
-      currency.formatMoney(comparePrice, theme.moneyFormat)
-    );
-
-    $(selectors$12.productPrice, $container).toggleClass(
-      classes$11.productPriceSale,
-      comparePrice > productPrice
-    );
-
-    $(selectors$12.unitPriceContainer, $container).addClass(
-      classes$11.productPriceUnitUnavailable
-    );
-    if (variant.unit_price_measurement) {
-      $(selectors$12.unitPrice, $container).html(
-        currency.formatMoney(variant.unit_price, theme.moneyFormat)
-      );
-      $(selectors$12.unitPriceBaseUnit, $container).html(
-        this.getBaseUnit(variant)
-      );
-      $(selectors$12.unitPriceContainer, $container).removeClass(
-        classes$11.productPriceUnitUnavailable
-      );
-    }
-  },
-
-  _updateVariantMediaImage: function(variant, $container) {
-    var $variantMediaImage = $(selectors$12.variantMediaImage, $container);
-    if (!this.product.media || !$variantMediaImage.length) return;
-
-    var src =
-      (variant.featured_media && variant.featured_media.preview_image.src) ||
-      this.product.media[0].preview_image.src;
-    var size = images.imageSize($variantMediaImage.attr('src'));
-    var sizedImgUrl = images.getSizedImageUrl(src, size);
-
-    $variantMediaImage.attr('src', sizedImgUrl);
-  },
-
-  _toggleVariantMediaHide: function(variant, $container) {
-    if (!variant.featured_media && !this.product.featured_media) return;
-
-    var media = variant.featured_media || this.product.featured_media.id;
-    var id = media && media.id;
-    var mediaId = this.id + '-' + id;
-
-    var $mediaGroup = $(selectors$12.variantMediaToggleHide, $container);
-    var $active = $mediaGroup.filter('[data-media-id="' + mediaId + '"]');
-
-    $active
-      .removeClass(classes$11.hide)
-      .siblings()
-      .not(selectors$12.shopifyXr)
-      .addClass(classes$11.hide);
-  },
-
-  _addItemToCart: function(evt) {
-    if (!sections.isInstance('cart-drawer')) return;
-
-    evt.preventDefault();
-    var $button = $(selectors$12.submitButton, this.$container);
-    var data = new FormData(evt.target);
-    if ($button.hasClass(classes$11.ajaxCartToggle)) return;
-
-    cart
-      .addItemFromForm(data)
-      .then(this._transitionAddToCartButton.bind(this, data))
-      .catch(this._onAddItemFail.bind(this))
-      .always(
-        function() {
-          this.trigger('variant_add_to_cart', [
-            this.product,
-            this.variant,
-            data
-          ]);
-        }.bind(this)
-      );
-  },
-
-  _onAddItemFail: function(response) {
-    var $notification = $(selectors$12.notification, this.$container);
-    var responseText = response && response.responseText;
-
-    if (responseText) {
-      responseText = JSON.parse(responseText).description;
-    } else {
-      responseText = theme.strings.cartError;
-    }
-
-    $notification
-      .addClass(classes$11.productNotificationError)
-      .removeClass(classes$11.productNotificationSuccess)
-      .html(responseText)
-      .attr('role', 'alert');
-
-    this.trigger('variant_add_to_cart_fail', [
-      this.product,
-      this.variant,
-      responseText
-    ]);
-
-    return utils.promiseTransitionEnd($notification);
-  },
-
-  _transitionAddToCartButton: function(data) {
-    var $notification = $(selectors$12.notification, this.$container);
-    var $button = $(selectors$12.submitButton, this.$container);
-    var $primaryButtonText = $(selectors$12.submitButtonPrimaryText, $button);
-    var $secondaryButtonText = $(selectors$12.submitButtonSecondaryText, $button);
-
-    $button
-      .addClass([classes$11.buttonTransition, classes$11.ajaxCartToggle].join(' '))
-      .attr('aria-label', theme.strings.viewCart);
-    $primaryButtonText.attr('aria-hidden', true);
-    $secondaryButtonText.attr('aria-hidden', false);
-
-    $notification
-      .removeClass(classes$11.productNotificationError)
-      .addClass(classes$11.productNotificationSuccess)
-      .text(theme.strings.addItemSuccess)
-      .attr('role', 'alert');
-
-    this.trigger('variant_add_to_cart_successful', [
-      this.product,
-      this.variant,
-      data
-    ]);
-
-    return utils.promiseTransitionEnd($notification);
-  },
-
-  _resetAddToCartButton: function($container) {
-    $container = $container.length ? $container : this.$container;
-    var $notification = $(selectors$12.notification, $container);
-    var $button = $(selectors$12.submitButton, $container);
-    var $primaryButtonText = $(selectors$12.submitButtonPrimaryText, $button);
-    var $secondaryButtonText = $(selectors$12.submitButtonSecondaryText, $button);
-
-    $button
-      .removeClass([classes$11.buttonTransition, classes$11.ajaxCartToggle].join(' '))
-      .attr('aria-label', theme.strings.addToCart);
-    $primaryButtonText.attr('aria-hidden', false);
-    $secondaryButtonText.attr('aria-hidden', true);
-
-    $notification
-      .removeClass(classes$11.productNotificationError)
-      .removeClass(classes$11.productNotificationSuccess)
-      .text('')
-      .attr('role', '');
-  },
-
-  _updateOnlineStatus: function() {
-    theme.isOnline = true;
-  },
-
-  _updateOfflineStatus: function() {
-    theme.isOnline = false;
-  },
-
-  getBaseUnit: function(variant) {
+  _getBaseUnit(variant) {
     return variant.unit_price_measurement.reference_value === 1
       ? variant.unit_price_measurement.reference_unit
       : variant.unit_price_measurement.reference_value +
           variant.unit_price_measurement.reference_unit;
   }
-};
 
-var types = {
-  link: 'link',
-  script: 'script'
-};
+  _updateProductPolicies(variant) {
+    if (!this.elements.productPolicies) return;
 
-var status = {
-  requested: 'requested',
-  loaded: 'loaded'
-};
+    this.elements.productPolicies.classList.remove(classes$9.visuallyHidden);
 
-var cloudCdn = 'https://cdn.shopify.com/shopifycloud/';
+    if (variant) return;
 
-var libraries = {
-  plyrShopifyStyles: {
-    tagId: 'plyr-shopify-styles',
-    src: cloudCdn + 'shopify-plyr/v1.0/shopify-plyr.css',
-    type: types.link
-  },
-  modelViewerUiStyles: {
-    tagId: 'shopify-model-viewer-ui-styles',
-    src: cloudCdn + 'model-viewer-ui/assets/v1.0/model-viewer-ui.css',
-    type: types.link
+    this.elements.productPolicies.classList.add(classes$9.visuallyHidden);
   }
-};
 
-var libraryLoader = {
-  load: function(libraryName, callback) {
-    var library = libraries[libraryName];
+  _updateAddToCart(variant) {
+    if (!this.elements.addToCart || !this.elements.addToCartText) return;
 
-    if (!library) return;
-    if (library.status === status.requested) return;
-
-    callback = callback || function() {};
-    if (library.status === status.loaded) {
-      callback();
-      return;
-    }
-
-    library.status = status.requested;
-
-    var tag;
-
-    switch (library.type) {
-      case types.script:
-        tag = this._createScriptTag(library, callback);
-        break;
-      case types.link:
-        tag = this._createLinkTag(library, callback);
-        break;
-    }
-
-    tag.id = library.tagId;
-    library.element = tag;
-
-    var firstScriptTag = document.getElementsByTagName(library.type)[0];
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-  },
-
-  _createScriptTag: function(library, callback) {
-    var tag = document.createElement('script');
-    tag.src = library.src;
-    tag.addEventListener('load', function() {
-      library.status = status.loaded;
-      callback();
-    });
-    return tag;
-  },
-
-  _createLinkTag: function(library, callback) {
-    var tag = document.createElement('link');
-    tag.href = library.src;
-    tag.rel = 'stylesheet';
-    tag.type = 'text/css';
-
-    utils.promiseStylesheet(library.src).then(function() {
-      library.status = status.loaded;
-      callback();
-    });
-
-    return tag;
-  }
-};
-
-var modelJsonSections = {};
-var models = {};
-var xrButtons = {};
-
-var selectors$13 = {
-  mediaGroup: '[data-media-group]',
-  productMediaTypeModel: '[data-product-media-type-model]',
-  xrButton: '[data-shopify-xr]'
-};
-
-var attributes = {
-  modelJson: 'data-model-json',
-  productSlideshowSlide: 'data-product-slideshow-slide'
-};
-
-var classes$12 = {
-  slideActive: 'slider__slide--active'
-};
-
-var productModel = {
-  initModelViewers: function($sectionContainer) {
-    utils.isTouch();
-
-    var $container = $sectionContainer || this.$container;
-    var $modelViewerElements = $(selectors$13.productMediaTypeModel, $container);
-    var $xrButtons = $(selectors$13.xrButton, $container);
-
-    if (!$xrButtons.length && !$modelViewerElements.length) return;
-    this._initModelViewerLibraries($modelViewerElements);
-  },
-
-  removeSectionModels: function() {
-    for (var key in models) {
-      if (models.hasOwnProperty(key)) {
-        var model = models[key];
-        if (model.sectionId === this.id) {
-          model.modelViewerUi.destroy();
-          delete models[key];
-        }
-      }
-    }
-    delete modelJsonSections[this.id];
-  },
-
-  _initModelViewerLibraries: function(modelViewerContainers) {
-    modelJsonSections[this.id] = {
-      loaded: false
-    };
-    var sectionId = this.id;
-
-    modelViewerContainers.each(function(index) {
-      var $modelViewerContainer = $(this);
-      var mediaId = $modelViewerContainer.data('media-id');
-      var $modelViewerElement = $(
-        $modelViewerContainer.find('model-viewer')[0]
+    if (!variant) {
+      this.elements.addToCart.setAttribute('aria-disabled', true);
+      this.elements.addToCart.setAttribute(
+        'aria-label',
+        theme.strings.unavailable
       );
-      var modelId = $modelViewerElement.data('model-id');
-
-      if (index === 0) {
-        var $xrButton = $modelViewerContainer
-          .closest(selectors$13.mediaGroup)
-          .find(selectors$13.xrButton);
-        xrButtons[sectionId] = {
-          $element: $xrButton,
-          defaultId: modelId
-        };
-      }
-
-      models[mediaId] = {
-        modelId: modelId,
-        sectionId: sectionId,
-        $container: $modelViewerContainer,
-        $element: $modelViewerElement
-      };
-    });
-
-    window.Shopify.loadFeatures([
-      {
-        name: 'shopify-xr',
-        version: '1.0',
-        onLoad: this._setupShopifyXr.bind(this)
-      }
-    ]);
-
-    if (!modelViewerContainers.length) return;
-
-    window.Shopify.loadFeatures([
-      {
-        name: 'model-viewer-ui',
-        version: '1.0',
-        onLoad: this._setupModelViewerUi.bind(this)
-      }
-    ]);
-    libraryLoader.load('modelViewerUiStyles');
-  },
-
-  _setupShopifyXr: function(errors) {
-    if (errors) return;
-
-    if (!window.ShopifyXR) {
-      document.addEventListener(
-        'shopify_xr_initialized',
-        function() {
-          this._setupShopifyXr();
-        }.bind(this)
+      this.elements.addToCartText.innerText = theme.strings.unavailable;
+    } else if (variant.available) {
+      this.elements.addToCart.removeAttribute('aria-disabled');
+      this.elements.addToCart.setAttribute(
+        'aria-label',
+        theme.strings.addToCart
       );
-      return;
-    }
-
-    for (var sectionId in modelJsonSections) {
-      if (modelJsonSections.hasOwnProperty(sectionId)) {
-        var modelSection = modelJsonSections[sectionId];
-
-        if (modelSection.loaded) continue;
-        var $modelJson = $(
-          '[' + attributes.modelJson + '="' + sectionId + '"]'
-        );
-
-        window.ShopifyXR.addModels(JSON.parse($modelJson.html()));
-        modelSection.loaded = true;
-      }
-    }
-    window.ShopifyXR.setupXRElements();
-  },
-
-  _setupModelViewerUi: function(errors) {
-    if (errors) return;
-
-    for (var key in models) {
-      if (models.hasOwnProperty(key)) {
-        var model = models[key];
-
-        if (!model.modelViewerUi) {
-          model.modelViewerUi = new Shopify.ModelViewerUI(model.$element, {
-            iconUrl: theme.modelViewerUiSprite
-          });
-        }
-
-        this._setupModelViewerListeners(model);
-      }
-    }
-  },
-
-  updateShopifyXr: function(sectionId, currentMediaId) {
-    var xrButton = xrButtons[sectionId];
-    if (!xrButton) return;
-
-    var modelId = currentMediaId
-      ? models[currentMediaId].modelId
-      : xrButton.defaultId;
-
-    xrButton.$element.attr('data-shopify-model3d-id', modelId);
-  },
-
-  _setupModelViewerListeners: function(model) {
-    var $mediaSlide = model.$container;
-    var $isSlideshow = $mediaSlide[0].hasAttribute(
-      attributes.productSlideshowSlide
-    );
-
-    if (!$isSlideshow) return;
-
-    model.$element
-      .on('shopify_model_viewer_ui_toggle_play', function() {
-        if (!$mediaSlide.hasClass(classes$12.slideActive)) return;
-
-        $mediaSlide.trigger('mediaSlideIsDraggable', [false]);
-      })
-      .on('shopify_model_viewer_ui_toggle_pause', function() {
-        if (!$mediaSlide.hasClass(classes$12.slideActive)) return;
-
-        $mediaSlide.trigger('mediaSlideIsDraggable', [true]);
-      });
-
-    model.$container.on('mediaVisible', function() {
-      if (utils.isTouch()) return;
-      model.modelViewerUi.play();
-    });
-
-    model.$container
-      .on('mediaHidden', function() {
-        model.modelViewerUi.pause();
-      })
-      .on('xrLaunch', function() {
-        model.modelViewerUi.pause();
-      });
-  }
-};
-
-var promiseYoutubeAPI;
-
-var youtube = {
-  promiseAPI: function() {
-    if (!promiseYoutubeAPI) {
-      var tag = document.createElement('script');
-
-      tag.src = 'https://www.youtube.com/iframe_api';
-      var firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-      promiseYoutubeAPI = $.Deferred(function(defer) {
-        window.onYouTubeIframeAPIReady = defer.resolve;
-
-        setTimeout(function() {
-          defer.reject('Request for YouTube API timed out after 30 seconds.');
-        }, 30000);
-      });
-    }
-
-    return promiseYoutubeAPI;
-  },
-
-  promisePlayer: function(id, options) {
-    return this.promiseAPI().then(function() {
-      return $.Deferred(function(defer) {
-        if (typeof window.YT === 'undefined') {
-          defer.reject(
-            "We're sorry, something went wrong. The YouTube API has not loaded correctly."
-          );
-        }
-
-        /* eslint-disable no-undef */
-        var player = new YT.Player(id, options); // global YT variable injected by YouTube API
-
-        player.addEventListener('onReady', function() {
-          defer.resolve(player);
-        });
-
-        setTimeout(function() {
-          defer.reject(
-            'Request for YouTube player has timed out after 30 seconds.'
-          );
-        }, 30000);
-      });
-    });
-  }
-};
-
-var videos = {};
-
-var hosts = {
-  html5: 'html5',
-  youtube: 'youtube'
-};
-
-var selectors$14 = {
-  productMediaWrapper: '[data-product-media-wrapper]',
-  productMediaTypeVideo: '[data-product-media-type-video]'
-};
-
-var attributes$1 = {
-  enableVideoLooping: 'enable-video-looping',
-  videoId: 'video-id',
-  productMediaSlide: 'data-product-slideshow-slide'
-};
-
-var productVideo = {
-  initProductVideos: function($sectionContainer) {
-    utils.isTouch();
-    var $container = $sectionContainer || this.$container;
-
-    $(selectors$14.productMediaTypeVideo, $container).each(
-      function(index, video) {
-        var $videoElement = $(video);
-
-        this._setupProductVideo($videoElement);
-      }.bind(this)
-    );
-  },
-
-  removeSectionVideos: function(sectionId) {
-    for (var key in videos) {
-      if (videos.hasOwnProperty(key)) {
-        var video = videos[key];
-
-        if (video.sectionId === sectionId) {
-          if (video.player) video.player.destroy();
-          delete videos[key];
-        }
-      }
-    }
-  },
-
-  _setupProductVideo: function($videoContainer) {
-    if (!$videoContainer.length) {
-      return;
-    }
-
-    var videoElement = $videoContainer.find('iframe, video')[0];
-    var mediaId = $videoContainer.data('media-id');
-    var self = this;
-
-    if (!videoElement) {
-      return;
-    }
-
-    videos[mediaId] = {
-      mediaId: mediaId,
-      sectionId: self.id,
-      host: self._hostFromVideoElement(videoElement),
-      $container: $videoContainer,
-      element: videoElement,
-      ready: function() {
-        self._createPlayer(this);
-      }
-    };
-
-    var video = videos[mediaId];
-
-    switch (video.host) {
-      case hosts.html5:
-        window.Shopify.loadFeatures([
-          {
-            name: 'video-ui',
-            version: '1.1',
-            onLoad: this._setupPlyrVideos.bind(this)
-          }
-        ]);
-        libraryLoader.load('plyrShopifyStyles');
-        break;
-      case hosts.youtube:
-        this._loadVideos(hosts.youtube);
-        break;
-    }
-  },
-
-  _setupPlyrVideos: function(errors) {
-    if (errors) {
-      this._fallbackToNativeVideo();
-      return;
-    }
-
-    this._loadVideos(hosts.html5);
-  },
-
-  _createPlayer: function(video) {
-    if (video.player) return;
-
-    var $productMediaWrapper = video.$container.closest(
-      selectors$14.productMediaWrapper
-    );
-    var isSlideshow = $($productMediaWrapper)[0].hasAttribute(
-      attributes$1.productMediaSlide
-    );
-    var enableLooping = $productMediaWrapper.data(
-      attributes$1.enableVideoLooping
-    );
-
-    switch (video.host) {
-      case hosts.html5:
-        // eslint-disable-next-line no-undef
-        video.player = new Shopify.Plyr(video.element, {
-          loop: { active: enableLooping },
-          iconUrl: theme.plyrSprite
-        });
-
-        // Only add the events if the media is in the slideshow.
-        if (isSlideshow) {
-          video.player.on('seeking', function() {
-            $productMediaWrapper.trigger('mediaSlideIsDraggable', [false]);
-          });
-
-          video.player.on(
-            'seeked',
-            debounce(function() {
-              $productMediaWrapper.trigger('mediaSlideIsDraggable', [true]);
-            }, 1000)
-          );
-        }
-
-        break;
-      case hosts.youtube:
-        var videoId = $productMediaWrapper.data(attributes$1.videoId);
-
-        if (video.requested) return;
-        video.requested = true;
-
-        youtube
-          .promisePlayer(video.element, {
-            videoId: videoId,
-            events: {
-              onStateChange: function(event) {
-                if (event.data === 0 && enableLooping) event.target.seekTo(0);
-              }
-            }
-          })
-          .then(function(player) {
-            video.player = player;
-          })
-          .catch(function(error) {
-            // eslint-disable-next-line no-console
-            console.error(error);
-          });
-        break;
-    }
-
-    $productMediaWrapper.on('mediaHidden xrLaunch', function() {
-      if (!video.player) return;
-
-      if (video.host === hosts.html5) {
-        video.player.pause();
-      }
-
-      if (video.host === hosts.youtube && video.player.pauseVideo) {
-        video.player.pauseVideo();
-      }
-    });
-
-    $productMediaWrapper.on('mediaVisible', function() {
-      if (utils.isTouch()) return;
-      if (!video.player) return;
-
-      if (video.host === hosts.html5) {
-        video.player.play();
-      }
-
-      if (video.host === hosts.youtube && video.player.playVideo) {
-        video.player.playVideo();
-      }
-    });
-  },
-
-  _hostFromVideoElement: function(video) {
-    if (video.tagName === 'VIDEO') {
-      return hosts.html5;
-    }
-
-    if (video.tagName === 'IFRAME') {
-      if (
-        /^(https?:\/\/)?(www\.)?(youtube\.com|youtube-nocookie\.com|youtu\.?be)\/.+$/.test(
-          video.src
-        )
-      ) {
-        return hosts.youtube;
-      }
-    }
-    return null;
-  },
-
-  _loadVideos: function(host) {
-    for (var key in videos) {
-      if (videos.hasOwnProperty(key)) {
-        var video = videos[key];
-
-        if (video.host === host) {
-          video.ready();
-        }
-      }
-    }
-  },
-
-  _fallbackToNativeVideo: function() {
-    for (var key in videos) {
-      if (videos.hasOwnProperty(key)) {
-        var video = videos[key];
-
-        if (video.nativeVideo) continue;
-
-        if (video.host === hosts.html5) {
-          video.element.setAttribute('controls', 'controls');
-          video.nativeVideo = true;
-        }
-      }
-    }
-  }
-};
-
-/*
-
-Featured Product Section
---------------------------------------------------------------------------------
-Shows a product and allows the user to select product variants and add the product
-to their cart.
-
-*/
-
-// Extensions
-// Libs
-var selectors$11 = {
-  socialSharing: '.social-sharing',
-  detailsButton: '.product__more-details'
-};
-
-sections.register('featured-product', {
-  onLoad: function() {
-    this.extend(socialSharing);
-    this.extend(productDisplay);
-    this.extend(productModel);
-    this.extend(productVideo);
-
-    this.initModelViewers();
-    this.initProductVideos();
-
-    this.on('variant_change', this._updateProductLink.bind(this));
-
-    this.window().on(
-      'resize',
-      debounce(this._formatVariantSelectors.bind(this), 500)
-    );
-  },
-
-  _updateProductLink: function(evt, instance, product, variant) {
-    var $link = $(selectors$11.detailsButton, this.$container);
-    var url = utils.updateUrlParameter(
-      $link.attr('href'),
-      'variant',
-      variant.id
-    );
-
-    $link.attr('href', url);
-  },
-
-  onUnload: function() {
-    this.removeSectionVideos(this.id);
-    this.removeSectionModels(this.id);
-  }
-});
-
-var selectors$16 = {
-  slides: '.slider__slide',
-  activeSlide: '.slider__slide--active'
-};
-
-var classes$14 = {
-  activeSlide: 'slider__slide--active',
-  previousSlide: 'slider__slide--previous',
-  nextSlide: 'slider__slide--next',
-  transitioningSlide: 'slider__slide--transitioning',
-  draggingSlide: 'slider__slide--dragging'
-};
-
-var events = {
-  nextSlide: 'nextslide',
-  prevSlide: 'prevslide',
-  transitionStart: 'slidetransitionstart',
-  transitionEnd: 'slidetransitionend'
-};
-
-var defaults = {
-  moveThreshold: 25
-};
-
-function Slider(element, settings) {
-  this.$element = $(element);
-  this.$slides = $(selectors$16.slides, this.$element);
-  this.config = $.extend({}, defaults, settings);
-  this.isDraggable = true;
-
-  this._setCurrentSlide($(selectors$16.activeSlide, this.$element));
-  this._assignTouchHandlers();
-
-  // We need to store the binded version of each event handler so that we can
-  // remove it in the `slider.destroy()` method.
-  this.bindedOnFocus = this._onFocus.bind(this);
-  this.bindedOnBlur = this._onBlur.bind(this);
-
-  // Need useCapture parameter in .addEventListener (the last parameter, set here
-  // to true) so we can't use jQuery `.on()`
-  if (this.$slides.length) {
-    this.$slides[0].addEventListener('focus', this.bindedOnFocus, true);
-    this.$slides[0].addEventListener('blur', this.bindedOnBlur, true);
-  }
-}
-
-Slider.prototype = $.extend({}, Slider.prototype, {
-  // Public Methods
-  // ---------------------------------------------------------------------------
-  destroy: function() {
-    this.$element.off('touchstart mousedown');
-    if (this.$slides.length) {
-      this.$slides[0].removeEventListener('focus', this.bindedOnFocus, true);
-      this.$slides[0].removeEventListener('blur', this.bindedOnBlur, true);
-    }
-
-    return null;
-  },
-
-  nextSlide: function() {
-    this._triggerEvent([events.nextSlide, events.transitionStart]);
-
-    return this._promiseNextSlide().then(
-      function() {
-        this._triggerEvent(events.transitionEnd);
-      }.bind(this)
-    );
-  },
-
-  previousSlide: function() {
-    this._triggerEvent([events.prevSlide, events.transitionStart]);
-
-    return this._promisePrevSlide().then(
-      function() {
-        this._triggerEvent(events.transitionEnd);
-      }.bind(this)
-    );
-  },
-
-  setSlide: function(setIndex, animate) {
-    var slidePromiseChain = this.slidePromiseChain || $.Deferred().resolve();
-    var currentIndex = this.$currentSlide.index();
-    var totalSlides = this.$slides.length;
-    var promiseSlide = $.Deferred().resolve();
-
-    this.slidePromiseChain = slidePromiseChain.then(
-      function() {
-        if (setIndex < totalSlides && setIndex !== currentIndex) {
-          if (animate) {
-            if (setIndex > currentIndex) {
-              promiseSlide = utils.promiseRepeatSeries(
-                this.nextSlide.bind(this),
-                setIndex - currentIndex
-              );
-            } else if (setIndex < currentIndex) {
-              promiseSlide = utils.promiseRepeatSeries(
-                this.previousSlide.bind(this),
-                currentIndex - setIndex
-              );
-            }
-          } else {
-            promiseSlide = this._promiseSlide(this.$slides.eq(setIndex));
-          }
-        }
-
-        return promiseSlide;
-      }.bind(this)
-    );
-
-    return this.slidePromiseChain;
-  },
-
-  setIsDraggable: function(isDraggable) {
-    this.isDraggable = isDraggable;
-  },
-
-  shouldPreventSlide: function(target, selectors, slideCount) {
-    if (slideCount < 2 || $(target).closest(selectors.join(',')).length) {
-      return true;
-    }
-
-    return false;
-  },
-
-  // Slide Management
-  // ---------------------------------------------------------------------------
-  _promiseNextSlide: function() {
-    requestAnimationFrame(
-      function() {
-        this.$nextSlide.addClass(classes$14.nextSlide);
-
-        requestAnimationFrame(
-          function() {
-            this.$slides.removeAttr('style');
-
-            this.$nextSlide
-              .removeClass(classes$14.nextSlide)
-              .addClass(classes$14.activeSlide)
-              .addClass(classes$14.transitioningSlide);
-
-            this.$currentSlide
-              .removeClass(classes$14.activeSlide)
-              .addClass(classes$14.previousSlide)
-              .addClass(classes$14.transitioningSlide);
-          }.bind(this)
-        );
-      }.bind(this)
-    );
-
-    return this._promiseSlideTransitionEnd().then(
-      function() {
-        this._setCurrentSlide(this.$nextSlide);
-      }.bind(this)
-    );
-  },
-
-  _promisePrevSlide: function() {
-    requestAnimationFrame(
-      function() {
-        this.$previousSlide.addClass(classes$14.previousSlide);
-
-        requestAnimationFrame(
-          function() {
-            this.$slides.removeAttr('style');
-
-            this.$previousSlide
-              .removeClass(classes$14.previousSlide)
-              .addClass(classes$14.activeSlide)
-              .addClass(classes$14.transitioningSlide);
-
-            this.$currentSlide
-              .removeClass(classes$14.activeSlide)
-              .addClass(classes$14.nextSlide)
-              .addClass(classes$14.transitioningSlide);
-          }.bind(this)
-        );
-      }.bind(this)
-    );
-
-    return this._promiseSlideTransitionEnd().then(
-      function() {
-        this._setCurrentSlide(this.$previousSlide);
-      }.bind(this)
-    );
-  },
-
-  _promiseSlide: function($slide) {
-    this._setCurrentSlide($slide);
-
-    $slide
-      .addClass(classes$14.activeSlide)
-      .siblings()
-      .removeClass(classes$14.activeSlide);
-
-    return $.Deferred(
-      function(defer) {
-        requestAnimationFrame(
-          function() {
-            this._triggerEvent(events.transitionEnd);
-            defer.resolve();
-          }.bind(this)
-        );
-      }.bind(this)
-    );
-  },
-
-  _promiseCancelSlide: function() {
-    requestAnimationFrame(
-      function() {
-        this.$slides.removeAttr('style').addClass(classes$14.transitioningSlide);
-      }.bind(this)
-    );
-
-    return this._promiseSlideTransitionEnd();
-  },
-
-  _promiseSlideTransitionEnd: function() {
-    return $.Deferred(
-      function(defer) {
-        this.$currentSlide.one(
-          'transitionend',
-          function() {
-            this.$slides.removeClass(
-              [
-                classes$14.transitioningSlide,
-                classes$14.nextSlide,
-                classes$14.previousSlide
-              ].join(' ')
-            );
-            defer.resolve();
-          }.bind(this)
-        );
-      }.bind(this)
-    );
-  },
-
-  _setCurrentSlide: function($slide) {
-    this.$currentSlide = $slide;
-    this.$nextSlide = this._nextSlideIndex($slide, this.$slides);
-    this.$previousSlide = this._prevSlideIndex($slide, this.$slides);
-  },
-
-  // Touch Handlers
-  // ---------------------------------------------------------------------------
-
-  _assignTouchHandlers: function() {
-    this.bindedTouchStart = this._onTouchStart.bind(this);
-    this.bindedTouchMove = this._onTouchMove.bind(this);
-    this.bindedTouchEnd = this._onTouchEnd.bind(this);
-
-    // When a touchstart OR mousedown event is fired, take action.
-    this.$element
-      .one('touchstart', this.bindedTouchStart)
-      .one('mousedown', this.bindedTouchStart);
-  },
-
-  _onTouchStart: function(evt) {
-    this.windowWidth = $(window).innerWidth();
-    this.startPosition = utils.pointerEventToXY(evt);
-    this.isDragging = false;
-
-    this.$element
-      .on('touchmove mousemove', this.bindedTouchMove)
-      .on('touchend mouseup', this.bindedTouchEnd);
-  },
-
-  _onTouchMove: function(evt) {
-    if (!this.isDraggable) return;
-
-    this.currentPosition = utils.pointerEventToXY(evt);
-    this.percentMoved =
-      ((this.currentPosition.x - this.startPosition.x) / this.windowWidth) *
-      100;
-
-    if (!this.isDragging) {
-      this.isDragging = true;
-    }
-
-    if (this.percentMoved > 0) {
-      this.$previousSlide.addClass(classes$14.previousSlide);
-      this.$nextSlide.removeClass(classes$14.nextSlide);
-      this.$previousSlide.css({
-        transform: 'translateX(' + (this.percentMoved - 100) + '%)'
-      });
+      this.elements.addToCartText.innerText = theme.strings.addToCart;
     } else {
-      this.$previousSlide.removeClass(classes$14.previousSlide);
-      this.$nextSlide.addClass(classes$14.nextSlide);
-      this.$nextSlide.css({
-        transform: 'translateX(' + (100 + this.percentMoved) + '%)'
-      });
+      this.elements.addToCart.setAttribute('aria-disabled', true);
+      this.elements.addToCart.setAttribute('aria-label', theme.strings.soldOut);
+      this.elements.addToCartText.innerText = theme.strings.soldOut;
+    }
+  }
+
+  _updateLiveRegion(text) {
+    if (!this.elements.productStatus) return;
+
+    this.elements.productStatus.innerText = text;
+    this.elements.productStatus.setAttribute('aria-hidden', false);
+
+    // hide content from accessibility tree after announcement
+    setTimeout(() => {
+      this.elements.productStatus.setAttribute('aria-hidden', true);
+    }, 1000);
+  }
+
+  _formatMoney(price) {
+    return formatMoney(price, theme.moneyFormat);
+  }
+
+  _getQuantityUpdatedText(quantity, isAddToCart) {
+    let liveMessage = theme.strings.productUpdatedOnCart.replace(
+      '[quantity]',
+      quantity
+    );
+
+    if (quantity === 0) liveMessage = theme.strings.productRemovedFromCart;
+    else if (quantity === 1 && isAddToCart)
+      liveMessage = theme.strings.productAddedToCart;
+
+    return liveMessage.replace(
+      '[title]',
+      this.elements.productForm.dataset.variantName
+    );
+  }
+
+  _getVariantUpdatedText(variant) {
+    if (!variant) return theme.strings.unavailable;
+
+    const isOnSale = variant.compare_at_price > variant.price;
+
+    const availability = variant.available ? '' : theme.strings.soldOut;
+
+    let regularPriceLabel = '';
+    let regularPrice = this._formatMoney(variant.price);
+
+    let salePriceLabel = '';
+    let salePrice = '';
+
+    let unitPriceLabel = '';
+    let unitPrice = '';
+
+    if (isOnSale) {
+      regularPriceLabel = theme.strings.regularPrice;
+      regularPrice = this._formatMoney(variant.compare_at_price);
+
+      salePriceLabel = theme.strings.salePrice;
+      salePrice = this._formatMoney(variant.price);
     }
 
-    this.$currentSlide
-      .addClass(classes$14.draggingSlide)
-      .css({ transform: 'translateX(' + this.percentMoved + '%)' });
-  },
+    if (variant.unit_price) {
+      unitPriceLabel = theme.strings.unitPrice;
+      unitPrice = `${this._formatMoney(variant.unit_price)} ${
+        theme.strings.unitPriceSeparator
+      } ${this._getBaseUnit(variant)}`;
+    }
 
-  _onTouchEnd: function() {
-    var moveThreshold = this.config.moveThreshold;
-    var promiseTransition = $.Deferred().resolve();
+    return `${availability} ${regularPriceLabel} ${regularPrice} ${salePriceLabel} ${salePrice} ${unitPriceLabel} ${unitPrice}`;
+  }
 
-    this.$element.off();
-
-    if (this.isDragging) {
-      this.isDragging = false;
-
-      this.$currentSlide.removeClass(classes$14.draggingSlide);
-
-      if (this.percentMoved > moveThreshold) {
-        promiseTransition = this.previousSlide();
-      } else if (this.percentMoved < -moveThreshold) {
-        promiseTransition = this.nextSlide();
+  _updateStoreAvailability(variant) {
+    if (this.storeAvailability) {
+      if (variant && variant.available) {
+        this.storeAvailability.updateContent(variant.id, variant.options);
+        this.storeAvailability.updateVariant(variant);
       } else {
-        promiseTransition = this._promiseCancelSlide();
+        this.storeAvailability.hide();
       }
     }
-
-    promiseTransition.then(
-      function() {
-        this.$element
-          .one('touchstart', this.bindedTouchStart)
-          .one('mousedown', this.bindedTouchStart);
-      }.bind(this)
-    );
-  },
-
-  // A11y
-  // ---------------------------------------------------------------------------
-  _onFocus: function() {
-    this.$element.one('keyup', this._onKeyup.bind(this));
-  },
-
-  _onBlur: function() {
-    this.$element.off('keyup');
-  },
-
-  _onKeyup: function(evt) {
-    var promiseTransition = $.Deferred().resolve();
-    var refocusOnSlideShow = false;
-    var shouldPreventSlide = this.shouldPreventSlide(
-      evt.target,
-      ['.plyr', '.shopify-model-viewer-ui'],
-      this.$slides.length
-    );
-
-    switch (evt.keyCode) {
-      case 37:
-        if (shouldPreventSlide) break;
-
-        promiseTransition = this.previousSlide();
-
-        refocusOnSlideShow = $.contains(
-          this.$element[0],
-          document.activeElement
-        );
-        break;
-      case 39:
-        if (shouldPreventSlide) break;
-
-        promiseTransition = this.nextSlide();
-
-        refocusOnSlideShow = $.contains(
-          this.$element[0],
-          document.activeElement
-        );
-        break;
-    }
-
-    promiseTransition.then(
-      function() {
-        if (refocusOnSlideShow) {
-          this.$element.focus();
-        }
-        this.$element.one('keyup', this._onKeyup.bind(this));
-      }.bind(this)
-    );
-  },
-
-  // Misc
-  // ---------------------------------------------------------------------------
-  _triggerEvent: function(names) {
-    if (typeof names === 'string') {
-      names = [names];
-    }
-
-    names.forEach(
-      function(name) {
-        this.$element.trigger(name, {
-          $previousSlide: this.$previousSlide,
-          $currentSlide: this.$currentSlide,
-          $nextSlide: this.$nextSlide
-        });
-      }.bind(this)
-    );
-  },
-
-  _nextSlideIndex: function($current, $slides) {
-    var index = $current.index();
-    var count = $slides.length;
-    var next = index + 1;
-
-    if (index + 1 === count) {
-      next = 0;
-    }
-
-    return $slides.eq(next);
-  },
-
-  _prevSlideIndex: function($current, $slides) {
-    var index = $current.index();
-    var count = $slides.length;
-    var prev = index - 1;
-
-    if (index - 1 === -1) {
-      prev = count - 1;
-    }
-
-    return $slides.eq(prev);
   }
-});
-
-/*
-
-Reveal Slider Extension
---------------------------------------------------------------------------------
-Manage the mobile reveal slider functionality.
-
-
-Events
-------------
-Name: reveal_slider_init_start
-Description: Fired at the start of the reveal slider initialization
-Payload: none
-
-Name: reveal_slider_init_done
-Description: Fired at the end of the reveal slider initialization
-Payload: none
-
-Name: reveal_slider_destroy
-Description: Fired when the reveal slider is destroyed
-Payload: none
-
-Name: reveal_slider_open_cover
-Description: Fired when the  slider cover is opened
-Payload: none
-
-Name: reveal_slider_close_cover
-Description: Fired when the  slider cover is closed
-Payload: none
-
-Name: reveal_slider_set_slide
-Description: Fired when the slider nav buttons are clicked to change a slide
-Payload: { number } Index of the slide to set as active
-
-*/
-
-var selectors$15 = {
-  coverTopBackground: '.reveal-slider__cover-background--top',
-  coverBottomBackground: '.reveal-slider__cover-background--bottom',
-  coverContent: '.reveal-slider__cover-content',
-  slideNavButtons: '.reveal-slider__nav-button',
-  slidePreviousButton: '.reveal-slider__previous-button',
-  slideNextButton: '.reveal-slider__next-button',
-  closeCoverButton: '.reveal-slider__close',
-  slider: '.slider'
-};
-
-var classes$13 = {
-  navButtonActive: 'active',
-  coverOpen: 'open'
-};
-
-var revealSlider = {
-  initRevealSlider: function() {
-    this.trigger('reveal_slider_init_start');
-
-    this.revealSlider = true;
-    this.coverIsOpen = false;
-    this.revealSliderNamespace = '.revealSlider';
-    this.mediaQuerySmall = theme.mediaQuerySmall;
-
-    this.slider = new Slider($(selectors$15.slider, this.$container));
-    this.hammertime = new Hammer(this.$container[0]);
-
-    this.on(
-      'click',
-      selectors$15.slideNavButtons,
-      this._onClickNavButton.bind(this)
-    );
-    this.on(
-      'click',
-      selectors$15.slidePreviousButton,
-      this.slider.previousSlide.bind(this.slider)
-    );
-    this.on(
-      'click',
-      selectors$15.slideNextButton,
-      this.slider.nextSlide.bind(this.slider)
-    );
-    this.on('click', selectors$15.closeCoverButton, this.closeCover.bind(this));
-    this.on('click', selectors$15.coverContent, this.openCover.bind(this));
-    this.on('nextslide prevslide', this._changeBackgroundColor.bind(this));
-    this.on('slidetransitionend', this._onSlideTransitionEnd.bind(this));
-
-    this.document().on(
-      'touchstart' + this.revealSliderNamespace,
-      this._onTouchStart.bind(this)
-    );
-    this.document().on(
-      'touchend' + this.revealSliderNamespace,
-      this._onTouchEnd.bind(this)
-    );
-
-    this.hammertime
-      .on('pinchout pinchin', this._onPinch.bind(this))
-      .on('pinchend pinchcancel', this._onPinchEnd.bind(this));
-
-    this.trigger('reveal_slider_init_done');
-  },
-
-  destroyRevealSlider: function() {
-    this.revealSlider = false;
-    this.slider = this.slider.destroy();
-    this.document().off(this.revealSliderNamespace);
-    this.off();
-
-    this.trigger('reveal_slider_destroy');
-  },
-
-  openCover: function() {
-    this.$container.addClass(classes$13.coverOpen);
-    this.coverIsOpen = true;
-    this.trigger('reveal_slider_open_cover');
-  },
-
-  closeCover: function() {
-    this.$container.removeClass(classes$13.coverOpen);
-    this.coverIsOpen = false;
-    this.trigger('reveal_slider_close_cover');
-  },
-
-  _changeBackgroundColor: function(evt, data) {
-    var color;
-
-    if (evt.type === 'nextslide') {
-      color = data.$nextSlide.data('background-color');
-    } else {
-      color = data.$previousSlide.data('background-color');
-    }
-
-    $(selectors$15.slider, this.$container).css({ backgroundColor: color });
-  },
-
-  _onSlideTransitionEnd: function(evt, data) {
-    var index = data.$currentSlide.index();
-
-    $(selectors$15.slideNavButtons, this.$container)
-      .eq(index)
-      .addClass(classes$13.navButtonActive)
-      .siblings()
-      .removeClass(classes$13.navButtonActive);
-  },
-
-  _onClickNavButton: function(evt) {
-    var $navButton = $(evt.target);
-    var index = $navButton.index();
-    this.slider.setSlide($navButton.index());
-    this.trigger('reveal_slider_set_slide', [index]);
-  },
-
-  _onTouchStart: function(evt) {
-    if (evt.originalEvent.touches.length <= 1) return;
-
-    this.enablePinch = true;
-
-    // Lock Scrolling over the zoom element by allowing Hammer.js to fire pinch events.
-    this.hammertime.get('pinch').set({ enable: this.enablePinch });
-  },
-
-  _onTouchEnd: function() {
-    if (!this.enablePinch) return;
-
-    this.enablePinch = false;
-    this.hammertime.get('pinch').set({ enable: this.enablePinch });
-  },
-
-  _onPinch: function(evt) {
-    this.$coverTopBackground =
-      this.$coverTopBackground ||
-      $(selectors$15.coverTopBackground, this.$container); // eslint-disable-line shopify/jquery-dollar-sign-reference
-    this.$coverBottomBackground =
-      this.$coverBottomBackground ||
-      $(selectors$15.coverBottomBackground, this.$container); // eslint-disable-line shopify/jquery-dollar-sign-reference
-    this.$coverTitle =
-      this.$coverTitle || $(selectors$15.coverContent, this.$container); // eslint-disable-line shopify/jquery-dollar-sign-reference
-
-    if (
-      (evt.type === 'pinchin' && !this.coverIsOpen) ||
-      (evt.type === 'pinchout' && this.coverIsOpen)
-    )
-      return;
-
-    // The distance of the top and bottom backgrounds (relative to the center
-    // of the slider) will be calculated based on evt.scale, which represents
-    // the scale factor between two pointersets (two finger points).
-    this.distance = this.coverIsOpen ? 70 * evt.scale : (evt.scale - 1) * 25;
-
-    if (this.distance < 0) {
-      this.distance = 0;
-    }
-
-    this.$coverBottomBackground.css({
-      transform: 'translateY(' + this.distance + '%)'
-    });
-    this.$coverTopBackground.css({
-      transform: 'translateY(-' + this.distance + '%)'
-    });
-    this.$coverTitle.css({ opacity: 1 - this.distance / 30 });
-  },
-
-  // If the scale factor is greater than 2, the cover will open automatically.
-  _onPinchEnd: function(evt) {
-    if (evt.scale > 2) {
-      this.$container.addClass(classes$13.coverOpen);
-      this.coverIsOpen = true;
-    } else {
-      this.$container.removeClass(classes$13.coverOpen);
-      this.coverIsOpen = false;
-    }
-
-    // When pinching, a style attribute is added to the following elements with
-    // the distance percentage. This callback will only get fired once at the
-    // end of a pinch and ensures the cover will either open or close automatically
-    // based on the conditional above.
-    requestAnimationFrame(
-      function() {
-        this.$coverTopBackground.removeAttr('style');
-        this.$coverBottomBackground.removeAttr('style');
-        this.$coverTitle.removeAttr('style');
-      }.bind(this)
-    );
-  }
-};
-
-/*
-
-Side Scroller Extension
---------------------------------------------------------------------------------
-Manages the desktop side scrolling behavior
-
-
-Events
-------------
-
-Name: side_scroller_init_start
-Description: Fired at the start of the side scroller initialization
-Payload: none
-
-Name: side_scroller_init_done
-Description: Fired at the end of the side scroller initialization
-Payload: none
-
-Name: side_scroller_destroy
-Description: Fired when the side scroller is destroyed
-Payload: none
-
-Name: side_scroller_position_top
-Description: Fired when the position of the side scroller sticky image is switched to the top
-Payload: none
-
-Name: side_scroller_position_fixed
-Description: Fired when the position of the side scroller sticky image is switched to be fixed
-Payload: none
-
-Name: side_scroller_position_bottom
-Description: Fired when the position of the side scroller sticky image is switched to the bottom
-Payload: none
-
-*/
-
-var selectors$17 = {
-  coverContent: '.side-scroller__cover-content',
-  slidesContainer: '.side-scroller__slides-container',
-  coverBackground: '.side-scroller__cover-background',
-  slides: '.side-scroller__slide'
-};
-
-var classes$15 = {
-  coverFixed: 'side-scroller--fixed',
-  coverBottom: 'side-scroller--fixed-bottom'
-};
-
-var sideScroller = {
-  initSideScroller: function() {
-    this.trigger('side_scroller_init_start');
-
-    this.$slides = $(selectors$17.slides, this.$container);
-    this.$slidesContainer = $(selectors$17.slidesContainer, this.$container);
-
-    this.sideScroller = true;
-    this.sideScrollerNamespace = '.sideScroller';
-    this.coverPosition = 'top';
-
-    this.window().on(
-      'scroll' + this.sideScrollerNamespace,
-      this._onScroll.bind(this)
-    );
-    this.window().on(
-      'resize' + this.sideScrollerNamespace,
-      this._updateCoverPositionValues.bind(this)
-    );
-    this.window().on(
-      'resize' + this.sideScrollerNamespace,
-      this._onScroll.bind(this)
-    );
-
-    this.document().on(
-      'drawer_open_start' + this.sideScrollerNamespace,
-      this._handleFixedSideImage.bind(this)
-    );
-    this.document().on(
-      'drawer_close_done' + this.sideScrollerNamespace,
-      this._resetFixedSideImage.bind(this)
-    );
-
-    utils.promiseStylesheet().then(
-      function() {
-        this._updateCoverPositionValues();
-        this._onScroll();
-
-        this.trigger('side_scroller_init_done');
-      }.bind(this)
-    );
-  },
-
-  destroySideScroller: function() {
-    this.sideScroller = false;
-    this.window().off(this.sideScrollerNamespace);
-    this.document().off(this.sideScrollerNamespace);
-
-    this.trigger('side_scroller_destroy');
-  },
-
-  _handleFixedSideImage: function() {
-    if (this.coverPosition !== 'fixed') return;
-
-    var $coverContent = $(selectors$17.coverContent, this.$container);
-    var coverContentHeight = $coverContent.outerHeight();
-    var scrollTop = $(window).scrollTop();
-    var translate = scrollTop - this.featuresOffset.top;
-
-    $(selectors$17.coverBackground, this.$container).css({
-      transform: 'translateY(' + translate + 'px)',
-      position: 'absolute'
-    });
-
-    $(selectors$17.coverContent, this.$container).css({
-      transform:
-        'translate(-50%, ' + (translate - coverContentHeight / 2) + 'px)',
-      position: 'absolute'
-    });
-  },
-
-  _resetFixedSideImage: function() {
-    if (this.coverPosition !== 'fixed') return;
-
-    $(selectors$17.coverBackground, this.$container)
-      .add(selectors$17.coverContent, this.$container)
-      .css({
-        transform: '',
-        position: ''
-      });
-  },
-
-  _onScroll: function() {
-    var scrollTop = $(window).scrollTop();
-
-    // If the top of the window has gone past the top of the featured slider
-    // and the window has not gone past the bottom of the featured slider,
-    // we set the cover to fixed.
-    // Debounce any style changes to the next from with requestAnimationFrame.
-    if (
-      scrollTop > this.featuresOffset.top &&
-      scrollTop + this.windowHeight <=
-        this.featuresOffset.top + this.featuresHeight
-    ) {
-      requestAnimationFrame(this._setCoverPosition.bind(this, 'fixed'));
-      requestAnimationFrame(this._updateBackgroundColor.bind(this, scrollTop));
-    } else if (
-      scrollTop + this.windowHeight >
-      this.featuresOffset.top + this.featuresHeight
-    ) {
-      requestAnimationFrame(this._setCoverPosition.bind(this, 'bottom'));
-    } else {
-      requestAnimationFrame(this._setCoverPosition.bind(this, 'top'));
-    }
-  },
-
-  _setCoverPosition: function(position) {
-    if (this.coverPosition !== position) {
-      switch (position) {
-        case 'top':
-          this.$container.removeClass(
-            [classes$15.coverBottom, classes$15.coverFixed].join(' ')
-          );
-          this.trigger('side_scroller_position_top');
-          break;
-        case 'fixed':
-          this.$container
-            .removeClass(classes$15.coverBottom)
-            .addClass(classes$15.coverFixed);
-          this.trigger('side_scroller_position_fixed');
-          break;
-        case 'bottom':
-          this.$container
-            .removeClass(classes$15.coverFixed)
-            .addClass(classes$15.coverBottom);
-          this.trigger('side_scroller_position_bottom');
-          break;
-      }
-    }
-
-    this.coverPosition = position;
-  },
-
-  _updateBackgroundColor: function(scrollTop) {
-    // The slide index is determined based on the current top position of the
-    // window relative to the height of the slide.
-    var currentSlideIndex = Math.floor(
-      (scrollTop - this.featuresOffset.top + this.windowHeight / 2) /
-        this.slideHeight
-    );
-
-    this.currentBackgroundIndex = this.currentBackgroundIndex || 0;
-
-    if (currentSlideIndex !== this.currentBackgroundIndex) {
-      this.currentBackgroundIndex = currentSlideIndex;
-      this.$slidesContainer.css({
-        backgroundColor: this.$slides
-          .eq(currentSlideIndex)
-          .data('background-color')
-      });
-    }
-  },
-
-  _updateCoverPositionValues: function() {
-    this.slideHeight = this.$slides.first().height();
-    this.featuresOffset = this.$container.offset();
-    this.featuresHeight = this.$container.height();
-    this.windowHeight = $(window).innerHeight();
-    this.windowWidth = $(window).innerWidth();
-  }
-};
-
-// Because the functionality is vastly different on mobile vs desktop, we
-// require two different extensions and load them here into one section
-sections.register('featured-slider', {
-  onLoad: function() {
-    this.coverIsOpen = false;
-
-    this.extend(revealSlider);
-    this.extend(sideScroller);
-
-    this._toggleViewState();
-
-    $(window).on('resize', debounce(this._toggleViewState.bind(this)));
-  },
-
-  onUnload: function() {
-    this._destroyDesktopState();
-    this._destroyMobileState();
-  },
-
-  onDeselect: function() {
-    if (this.mobileViewEnabled) {
-      this.closeCover();
-    }
-  },
-
-  onBlockSelect: function(evt) {
-    if (this.mobileViewEnabled) {
-      this.openCover();
-      this.slider.setSlide($(evt.target).index());
-    } else {
-      $('html, body').animate(
-        {
-          scrollTop: $(evt.target).offset().top
-        },
-        400
-      );
-    }
-  },
-
-  onBlockDeselect: function() {
-    if (this.mobileViewEnabled) {
-      this.revealSlider.closeCover();
-    }
-  },
-
-  _toggleViewState: function() {
-    var windowWidth = $(window).innerWidth();
-    var enableMobileView;
-    var enableDesktopView;
-
-    if (typeof this.mobileViewEnabled === 'undefined') {
-      enableMobileView = windowWidth < theme.mediaQuerySmall;
-      enableDesktopView = windowWidth >= theme.mediaQuerySmall;
-    } else {
-      enableMobileView =
-        windowWidth < theme.mediaQuerySmall && !this.mobileViewEnabled;
-      enableDesktopView =
-        windowWidth >= theme.mediaQuerySmall && this.mobileViewEnabled;
-    }
-
-    if (enableMobileView) {
-      this.mobileViewEnabled = true;
-      this._destroyDesktopState();
-      this._enableMobileState();
-    }
-
-    if (enableDesktopView) {
-      this.mobileViewEnabled = false;
-      this._destroyMobileState();
-      this._enableDesktopState();
-    }
-  },
-
-  _enableDesktopState: function() {
-    this.initSideScroller();
-  },
-
-  _destroyDesktopState: function() {
-    if (typeof this.sideScroller !== 'undefined') {
-      this.destroySideScroller();
-    }
-  },
-
-  _enableMobileState: function() {
-    this.initRevealSlider();
-  },
-
-  _destroyMobileState: function() {
-    if (this.revealSlider) {
-      this.destroyRevealSlider();
-    }
-  }
-});
-
-var classes$16 = {
-  footerParallax: 'site-footer--parallax'
-};
-
-var selectors$18 = {
-  contentForLayout: '.content-for-layout',
-  footerCover: '.site-footer__drawer-cover '
-};
-
-sections.register('footer', {
-  onLoad: function() {
-    if (
-      !this.container.hasAttribute('data-footer-parallax') ||
-      ($('html').hasClass('is-ios') && Shopify.designMode)
-    )
-      return;
-
-    this.window().on('resize', this._setParallax.bind(this));
-    this.document().on(
-      'drawer_open_start',
-      this._handleDrawerOpenState.bind(this)
-    );
-    this.document().on(
-      'drawer_close_done',
-      this._resetDrawerOpenState.bind(this)
-    );
-
-    $(document.body).addClass(classes$16.footerParallax);
-
-    utils.promiseStylesheet().then(this._setParallax.bind(this));
-  },
-
-  onUnload: function() {
-    $(document.body).removeClass(classes$16.footerParallax);
-    $(selectors$18.contentForLayout).css('margin-bottom', '');
-  },
-
-  _setParallax: function() {
-    this.height = this.$container.innerHeight();
-    $(selectors$18.contentForLayout).css('margin-bottom', this.height);
-  },
-
-  _handleDrawerOpenState: function() {
-    if (document.body.scrollHeight - window.innerHeight === 0) {
-      // If the page is smaller than the window
-      this.$container.css(
-        'margin-bottom',
-        document.body.clientHeight - document.body.scrollHeight
-      );
-    } else {
-      // If the page is longer than the window
-      var distanceFromBottom =
-        document.body.scrollHeight - window.innerHeight - window.scrollY;
-      var adjustFooter = distanceFromBottom - this.height;
-
-      this.$container.css('margin-bottom', adjustFooter);
-      $(selectors$18.footerCover)
-        .css('height', distanceFromBottom)
-        .show();
-    }
-  },
-
-  _resetDrawerOpenState: function() {
-    this.$container.css('margin-bottom', '');
-    $(selectors$18.footerCover).hide();
-  }
-});
-
-var selectors$19 = {
-  skipLink: '.skip-link',
-  navigation: '.navigation',
-  navAnimateElements: '.navigation__entrance-animation',
-  cartBubble: '.site-header__cart-bubble',
-  siteHeader: '.site-header',
-  siteHeaderWrapper: '.site-header__wrapper',
-  siteHeaderLogo: '.site-header__logo',
-  siteHeaderCart: '.site-header__cart',
-  siteNavigation: '[data-site-navigation]',
-  navigationButton: '[data-navigation-button]',
-  navigationExpandSublinks: '.navigation__expand-sublinks',
-  navigationExpandChildSublinks: '.navigation__expand-sublinks--third-level',
-  navigationSublinksContainer: '.navigation__sublinks-container',
-  navigationSublink: '.navigation__sublink',
-  navigationSublinks: '.navigation__sublinks',
-  navigationChildSublinks: '.navigation__sublinks--third-level',
-  navigationHasSublinks: '.navigation__has-sublinks',
-  announcementBar: '.announcement-bar',
-  announcementBarClose: '.announcement-bar__close',
-  contentForLayout: '.content-for-layout'
-};
-
-var classes$17 = {
-  themeEditor: 'theme-editor',
-  headerFixed: 'site-header--fixed',
-  headerHomepage: 'site-header--homepage',
-  headerTransparent: 'site-header--transparent',
-  cartBubbleVisible: 'site-header__cart-bubble--visible',
-  bubblePulse: 'bubble-pulse',
-  drawerActive: 'drawer--active',
-  navigationExpandChildSublinks: 'navigation__expand-sublinks--third-level',
-  navigationOpen: 'navigation-open',
-  navigationOpenEditor: 'navigation-open--editor',
-  navigationTransitioning: 'navigation--is-transitioning',
-  navigationHasSublinksCollapsed: 'navigation__has-sublinks--collapsed',
-  navigationEntranceActive: 'navigation__entrance-animation--active',
-  siteHeaderWrapperTransitioning: 'site-header__wrapper--transitioning',
-  announcementBarVisible: 'announcement-bar--visible'
-};
-
-var sectionsWithTransparentHeader = ['slideshow-section', 'gallery', 'hero'];
-var scrollHandler = true;
-var blockEditorEvents = false;
-var navigationManuallyToggled = false;
-
-sections.register('header-section', {
-  /*--------------------------------------------------------------------------*/
-  /*                             Editor Events                                */
-  /*--------------------------------------------------------------------------*/
-  onLoad: function() {
-    this.$container = $(this.container);
-    this.$siteHeader = $(selectors$19.siteHeader);
-    this.$siteHeaderWrapper = $(selectors$19.siteHeaderWrapper);
-
-    this.scrollTop = 0;
-    this.isFixed = false;
-    this.headerHeight = 0;
-    this.promiseChain = $.Deferred().resolve();
-    this._updateHeaderTransparency();
-
-    // Initially disable tabbing through site navigation
-    utils.disableTabbingOfChildren(selectors$19.navigation);
-
-    $(selectors$19.navigationButton)
-      .one('click', this._toggleNavigationDisplay.bind(this))
-      .one('click', this._setSublinksMaxHeight.bind(this));
-
-    $(selectors$19.navigationExpandSublinks, this.$container).on(
-      'click',
-      this._toggleNavigationSublinks.bind(this)
-    );
-
-    $(selectors$19.announcementBarClose, this.$container).on(
-      'click',
-      this._closeAnnouncementBar.bind(this)
-    );
-
-    // Disable the sticky and/or transparent header in iOS editor
-    if ($('html').hasClass('is-ios') && Shopify.designMode) {
-      this.$siteHeader.removeClass(classes$17.headerHomepage);
-      this.$siteHeader.removeClass(classes$17.headerTransparent);
-    } else {
-      // Don't call _toggleHeaderPosition on scroll in the iOS editor
-      $(document).on(
-        'scroll' + this.namespace,
-        throttle(this._toggleHeaderPosition.bind(this), 200)
-      );
-    }
-
-    $(window).on(
-      'resize' + this.namespace,
-      this._adjustNavigationPadding.bind(this)
-    );
-
-    $(document).on(
-      'shopify:section:reorder shopify:section:load',
-      this._updateHeaderTransparency.bind(this)
-    );
-
-    $(document).on(
-      'shopify:section:unload',
-      function() {
-        setTimeout(this._updateHeaderTransparency.bind(this));
-      }.bind(this)
-    );
-
-    cart.on('change', this._toggleCartBubble.bind(this));
-
-    utils.promiseStylesheet().then(
-      function() {
-        this._setupAnnouncementBar();
-      }.bind(this)
-    );
-  },
-
-  onSelect: function() {
-    this._adjustNavigationPadding();
-
-    // If you close the navigation to view and edit the transparent header
-    // settings, then you don't want the navigation to open when it reloads
-    // with your changes. Skip opening the navigation if the user has clicked
-    // on the 'X' of the navigation.
-    if (navigationManuallyToggled) return;
-
-    // Block the 'onDeselect' if it is fired within 100ms
-    blockEditorEvents = true;
-
-    this.showNavigation();
-  },
-
-  onDeselect: function() {
-    // Make sure that we're not blocking editor events by default
-    blockEditorEvents = false;
-
-    // When a section is reloaded by the editor it fires the 'onDeselect',
-    // 'onUnload', 'onLoad', and then 'onSelect' events. We don't want to hide
-    // the navigation when the section reloads from an edit. If we receive a
-    // `onSelect` event within 100ms of the 'onDeselect' event, then it is
-    // canceled.
-    setTimeout(
-      function() {
-        if (blockEditorEvents) return;
-
-        navigationManuallyToggled = false;
-        blockEditorEvents = false;
-
-        this.hideNavigation();
-      }.bind(this),
-      100
-    );
-  },
-
-  /*--------------------------------------------------------------------------*/
-  /*                                 Header                                   */
-  /*--------------------------------------------------------------------------*/
-  _setupAnnouncementBar: function() {
-    var $announcementBar = $(selectors$19.announcementBar, this.$container);
-
-    if (!$announcementBar.length) return;
-
-    if (
-      utils.isSessionStorageSupported() &&
-      sessionStorage.getItem('announcement-bar-hidden')
-    )
-      return;
-
-    requestAnimationFrame(
-      function() {
-        $announcementBar.addClass(classes$17.announcementBarVisible);
-        this.$siteHeaderWrapper.css(
-          'margin-top',
-          '-' + $announcementBar.outerHeight() + 'px'
-        );
-
-        requestAnimationFrame(
-          function() {
-            this.$siteHeaderWrapper
-              .addClass(classes$17.siteHeaderWrapperTransitioning)
-              .css('margin-top', '');
-          }.bind(this)
-        );
-      }.bind(this)
-    );
-  },
-
-  _closeAnnouncementBar: function(evt) {
-    evt.preventDefault();
-
-    if (Shopify.designMode) return;
-
-    var $announcementBar = $(selectors$19.announcementBar);
-
-    this.$siteHeaderWrapper.css(
-      'margin-top',
-      '-' + $announcementBar.outerHeight() + 'px'
-    );
-
-    $(selectors$19.announcementBarClose).attr('aria-expanded', false);
-
-    if (utils.isSessionStorageSupported()) {
-      sessionStorage.setItem('announcement-bar-hidden', true);
-    }
-
-    utils.promiseTransitionEnd(this.$siteHeaderWrapper).then(
-      function() {
-        $announcementBar.remove();
-
-        this.$siteHeaderWrapper
-          .removeClass(classes$17.siteHeaderWrapperTransitioning)
-          .css('margin-top', '');
-      }.bind(this)
-    );
-  },
-
-  _updateHeaderTransparency: function() {
-    if ($('html').hasClass('is-ios') && Shopify.designMode) return;
-
-    this.$siteHeader.removeClass(classes$17.headerTransparent);
-
-    // Only continue if we're on the homepage and transparent header setting is enabled.
-    if (!this.$siteHeader.data('transparent-header')) return;
-
-    var $firstSection = $(selectors$19.contentForLayout)
-      .find('[data-section-type]')
-      .first();
-
-    // Only continue if first section exists and its type allows for a transparent header
-    if (
-      !$firstSection.length ||
-      sectionsWithTransparentHeader.indexOf(
-        $firstSection.data('section-type')
-      ) === -1
-    )
-      return;
-
-    this.$siteHeader.addClass(classes$17.headerTransparent);
-  },
-
-  _toggleHeaderPosition: function() {
-    // Check if toggle is disabled by other settings
-    if (!scrollHandler || this.headerAnimating) return;
-
-    var scrollTop = $(document).scrollTop();
-
-    this.headerHeight = this.headerHeight || this.$container.outerHeight();
-
-    // Check which header transformation needs to happen. Also check if a toggle
-    // even needs to happen, i.e. if you're scrolling up and the header is
-    // already displayed, why call slideOut again?
-    // Debounce any style changes to the next frame using requestAnimationFrame
-    if (scrollTop <= 0) {
-      requestAnimationFrame(this._promiseHeaderReset.bind(this));
-    } else if (
-      scrollTop < this.scrollTop &&
-      scrollTop > 0 &&
-      !this.isFixed &&
-      !this.isAnimating
-    ) {
-      requestAnimationFrame(this._promiseHeaderSlideIn.bind(this));
-    } else if (
-      scrollTop > this.scrollTop &&
-      scrollTop > this.headerHeight &&
-      this.isFixed &&
-      !this.isAnimating
-    ) {
-      requestAnimationFrame(this._promiseHeaderSlideOut.bind(this));
-    }
-
-    this.scrollTop = scrollTop;
-
-    // The scroll event is fired randomly and is not guaranteed to fire when
-    // scrollTop === 0. Double check after a short period to see if we need to
-    // reset the header.
-    this._doubleCheckPosition();
-  },
-
-  _doubleCheckPosition: function() {
-    if (typeof this.doubleCheckDebounced === 'undefined') {
-      this.doubleCheckDebounced = debounce(
-        function() {
-          this.scrollTop = $(document).scrollTop();
-          if (this.scrollTop <= 0) {
-            this._promiseHeaderReset();
-          }
-        }.bind(this),
-        500
-      );
-    }
-
-    this.doubleCheckDebounced();
-  },
-
-  _promiseHeaderReset: function() {
-    this.promiseChain = this.promiseChain.then(
-      function() {
-        this.$container.removeClass(classes$17.headerFixed);
-        $('body').css('padding-top', '');
-      }.bind(this)
-    );
-  },
-
-  _promiseHeaderSlideIn: function() {
-    this.isFixed = true;
-    this.headerAnimating = true;
-    this.$siteHeaderWrapper.css('transform', 'translateY(-100%)');
-
-    requestAnimationFrame(
-      function() {
-        this.$container.addClass(classes$17.headerFixed);
-
-        if (!this.$container.hasClass(classes$17.headerHomepage)) {
-          $('body').css('padding-top', this.headerHeight);
-        }
-
-        requestAnimationFrame(
-          function() {
-            this.$siteHeaderWrapper.css({
-              transform: 'translateY(0%)',
-              transition: 'transform 0.25s ease-out'
-            });
-          }.bind(this)
-        );
-      }.bind(this)
-    );
-
-    return utils.promiseTransitionEnd(this.$siteHeaderWrapper).then(
-      function() {
-        this.headerAnimating = false;
-        this.$siteHeaderWrapper.attr('style', '');
-      }.bind(this)
-    );
-  },
-
-  _promiseHeaderSlideOut: function() {
-    this.isFixed = false;
-    this.headerAnimating = true;
-
-    this.$siteHeaderWrapper.css({
-      transform: 'translateY(-100%)',
-      transition: 'transform 0.25s ease-out'
-    });
-
-    return utils.promiseTransitionEnd(this.$siteHeaderWrapper).then(
-      function() {
-        this.headerAnimating = false;
-        this.$siteHeaderWrapper.attr('style', '');
-        $('body').css('padding-top', '');
-        this.$container.removeClass(classes$17.headerFixed);
-      }.bind(this)
-    );
-  },
-
-  _toggleCartBubble: function(evt, state) {
-    var $bubble = $(selectors$19.cartBubble, this.$container);
-
-    $bubble.toggleClass(classes$17.cartBubbleVisible, state.items.length !== 0);
-
-    if (!$('body').hasClass(classes$17.drawerActive)) {
-      $bubble.addClass(classes$17.bubblePulse);
-
-      utils.promiseAnimationEnd($bubble).then(function() {
-        $bubble.removeClass(classes$17.bubblePulse);
-      });
-    }
-  },
-
-  /*--------------------------------------------------------------------------*/
-  /*                              Navigation                                  */
-  /*--------------------------------------------------------------------------*/
-  showNavigation: function() {
-    var isOpen = $(document.body).hasClass(classes$17.navigationOpen);
-    this.siteNavigation = this.container.querySelector(
-      selectors$19.siteNavigation
-    );
-    var navigationButton = this.siteNavigation.querySelector(
-      selectors$19.navigationButton
-    );
-
-    if (!isOpen) {
-      scrollHandler = false;
-
-      this._adjustNavigationPadding();
-      a11y.trapFocus(this.siteNavigation, {
-        elementToFocus: navigationButton
-      });
-
-      utils.enableTabbingOfChildren(selectors$19.navigation);
-      $(selectors$19.navigation).attr('aria-hidden', false);
-
-      this.promiseChain = this.promiseChain
-        .then(this._promiseNavTransition.bind(this, true))
-        .then(
-          this._promiseNavItemsTransition.bind(
-            this,
-            $(selectors$19.navAnimateElements, this.$container).toArray(),
-            true
-          )
-        )
-        .then(
-          function() {
-            $(document).on(
-              'keyup' + this.namespace,
-              this._closeOnEscape.bind(this)
-            );
-            $(selectors$19.navigationButton)
-              .attr('aria-expanded', true)
-              .off()
-              .one('click', this._toggleNavigationDisplay.bind(this));
-          }.bind(this)
-        );
-    }
-
-    return this.promiseChain.then(function() {
-      // This class is only applied in the Theme Editor and makes sure that
-      // the navigation links show when the section reloads from settings
-      // changes.
-      if (Shopify.designMode) {
-        $(document.body).addClass(classes$17.navigationOpenEditor);
-      }
-    });
-  },
-
-  hideNavigation: function() {
-    var isOpen = $(document.body).hasClass(classes$17.navigationOpen);
-
-    if (isOpen) {
-      var $navElements = $(selectors$19.navAnimateElements, this.$container);
-
-      a11y.removeTrapFocus();
-
-      utils.disableTabbingOfChildren(selectors$19.navigation);
-      $(selectors$19.navigation).attr('aria-hidden', true);
-
-      if (Shopify.designMode) {
-        $(document.body).removeClass(classes$17.navigationOpenEditor);
-        $navElements.addClass(classes$17.navigationEntranceActive);
-      }
-
-      this.promiseChain = this.promiseChain
-        .then(
-          this._promiseNavItemsTransition.bind(
-            this,
-            $navElements.toArray().reverse(),
-            false
-          )
-        )
-        .then(this._promiseNavTransition.bind(this, false))
-        .then(
-          function() {
-            scrollHandler = true;
-            $(document).off('keyup' + this.namespace);
-            $(selectors$19.navigationButton)
-              .off()
-              .one('click', this._toggleNavigationDisplay.bind(this))
-              .attr('aria-expanded', false)
-              .focus();
-          }.bind(this)
-        );
-    }
-
-    return this.promiseChain;
-  },
-
-  _toggleNavigationDisplay: function() {
-    navigationManuallyToggled = true;
-
-    if ($(document.body).hasClass(classes$17.navigationOpen)) {
-      this.hideNavigation();
-    } else {
-      this.showNavigation();
-    }
-  },
-
-  _adjustNavigationPadding: function() {
-    this.headerHeight = this.$siteHeader.height();
-    $(selectors$19.navigation, this.$container).css({
-      top: this.headerHeight + 'px',
-      'min-height': 'calc(100vh - ' + this.headerHeight + 'px)',
-      'max-height': 'calc(100vh - ' + this.headerHeight + 'px)'
-    });
-  },
-
-  _promiseNavTransition: function(active) {
-    $(document.body)
-      .addClass(classes$17.navigationTransitioning)
-      .toggleClass(classes$17.navigationOpen, active);
-
-    $(window).scrollTop(this.scrollTop);
-
-    return utils
-      .promiseTransitionEnd($(selectors$19.navigation, this.$container))
-      .then(function() {
-        $(document.body).removeClass(classes$17.navigationTransitioning);
-      });
-  },
-
-  _promiseNavItemsTransition: function(elements, active) {
-    return utils.mapPromiseSeries(elements, function(index, element) {
-      var $element = $(element);
-
-      $element.toggleClass(classes$17.navigationEntranceActive, active);
-
-      return utils.promiseTransitionEnd($element);
-    });
-  },
-
-  _closeOnEscape: function(evt) {
-    if (evt.keyCode === 27) {
-      this.hideNavigation();
-    }
-  },
-
-  _toggleNavigationSublinks: function(evt) {
-    var $anchor = $(evt.currentTarget);
-    var $parent = $anchor.parent();
-    var isExpanded = $anchor.attr('aria-expanded') === 'true';
-    var $childSublinks = $parent.find(selectors$19.navigationExpandChildSublinks);
-
-    $parent.toggleClass(classes$17.navigationHasSublinksCollapsed);
-    $parent
-      .siblings(selectors$19.navigationHasSublinks)
-      .addClass(classes$17.navigationHasSublinksCollapsed)
-      .children(selectors$19.navigationExpandSublinks)
-      .attr('aria-expanded', false);
-
-    this._setMaxHeight($parent.siblings(selectors$19.navigationHasSublinks), '');
-
-    if ($childSublinks.length) {
-      this._updateSublinkMaxHeight($anchor);
-    }
-
-    $anchor.attr('aria-expanded', !isExpanded);
-    this._toggleSubNavigationElementHeight($anchor);
-  },
-
-  _updateSublinkMaxHeight: function($anchor) {
-    var isChildSublink = $anchor.hasClass(
-      classes$17.navigationExpandChildSublinks
-    );
-
-    if (!isChildSublink) {
-      return;
-    }
-
-    var $sublinkContainer = $anchor.closest(
-      selectors$19.navigationSublinksContainer
-    );
-    var $childSublinks = $sublinkContainer.find(
-      selectors$19.navigationHasSublinks
-    );
-
-    var maxHeight = $sublinkContainer.data('max-height');
-
-    $childSublinks.each(function() {
-      var $el = $(this);
-
-      if ($el.hasClass(classes$17.navigationHasSublinksCollapsed)) {
-        return;
-      }
-
-      var $childSublink = $el.find(selectors$19.navigationChildSublinks);
-      var $parent = $childSublink.parent();
-
-      maxHeight += $parent.data('max-height');
-    });
-
-    $sublinkContainer.css('max-height', maxHeight);
-  },
-
-  _setSublinksMaxHeight: function() {
-    $(selectors$19.navigationSublinks, this.$container).each(function() {
-      var $el = $(this);
-      var $parent = $el.parent();
-      var sublinkHeight = $el.outerHeight();
-
-      $parent
-        .data('max-height', sublinkHeight)
-        .css('max-height', sublinkHeight);
-    });
-  },
-
-  _toggleSubNavigationElementHeight: function($anchor) {
-    var $currentListItem = $anchor.parent('li');
-    if ($currentListItem.hasClass(classes$17.navigationHasSublinksCollapsed)) {
-      this._setMaxHeight($currentListItem, '');
-    } else {
-      if ($currentListItem.hasClass(selectors$19.navigationSublink)) {
-        this._updateSublinkMaxHeight($currentListItem);
-        return;
-      }
-      this._setMaxHeight($currentListItem, 'none');
-    }
-  },
-
-  _setMaxHeight: function(element, maxHeight) {
-    element.css('max-height', maxHeight);
-  }
-});
-
-/*
-
-List Collections Template Section
---------------------------------------------------------------------------------
-Creates a staggered card grid for the list collections template.
-
-*/
-
-// Extensions
-// Libs
-sections.register('list-collections-template', {
-  onLoad: function() {
-    this.extend(cardManager);
-  }
-});
-
-var promiseGoogleMapsAPI;
-
-var errors = {
-  zeroResults: theme.strings.map && theme.strings.map.zeroResults,
-  overQueryLimit: theme.strings.map && theme.strings.map.overQueryLimit,
-  authError: theme.strings.map && theme.strings.map.authError,
-  requestDenied: theme.strings.map && theme.strings.map.addressError,
-  geocodeUnknownError: theme.strings.map && theme.strings.map.addressError,
-  missingKey: theme.strings.map && theme.strings.map.addressError,
-  apiLoadError: theme.strings.map && theme.strings.map.authError
-};
-
-function errorMessage(status) {
-  var error;
-
-  switch (status) {
-    case 'ZERO_RESULTS':
-      error = errors.zeroResults;
-      break;
-    case 'OVER_QUERY_LIMIT':
-      error = errors.overQueryLimit;
-      break;
-    case 'REQUEST_DENIED':
-      error = errors.requestDenied;
-      break;
-    case 'UNKNOWN_ERROR':
-      error = errors.geocodeUnknownError;
-      break;
-    default:
-      error = errors.geocodeUnknownError;
-  }
-
-  return error;
 }
 
-var googleMaps = {
-  promiseAPI: function(key) {
-    key = key || '';
-
-    if (typeof promiseGoogleMapsAPI === 'undefined') {
-      promiseGoogleMapsAPI = $.getScript(
-        'https://maps.googleapis.com/maps/api/js?key=' + key
-      );
-    }
-
-    return promiseGoogleMapsAPI.then(function() {
-      return $.Deferred(function(defer) {
-        if (!window.google || !window.google.maps) {
-          defer.reject(errors.apiLoadError);
-        }
-
-        defer.resolve(window.google);
-      });
-    });
-  },
-
-  promiseGeocode: function(address) {
-    return this.promiseAPI().then(function(google) {
-      return $.Deferred(function(defer) {
-        var geocoder;
-
-        // Global function called by Google on auth errors.
-        window.gm_authFailure = function() {
-          // eslint-disable-line camelcase
-          defer.reject(errors.authError);
-        };
-
-        geocoder = new google.maps.Geocoder();
-        geocoder.geocode({ address: address }, function(results, status) {
-          if (status !== google.maps.GeocoderStatus.OK) {
-            defer.reject(errorMessage(status));
-          }
-          defer.resolve(results);
-        });
-      });
-    });
-  },
-
-  promiseMap: function(config) {
-    return $.when(
-      this.promiseAPI(config.key),
-      this.promiseGeocode(config.address)
-    ).then(function(google, results) {
-      return $.Deferred(function(defer) {
-        var map;
-        var center = results[0].geometry.location;
-        var mapOptions = $.extend(
-          {},
-          {
-            zoom: 14,
-            center: center,
-            disableDefaultUI: true
-          },
-          config
-        );
-
-        // Global function called by Google on auth errors.
-        // Show an auto error message on all map instances.
-        window.gm_authFailure = function() {
-          // eslint-disable-line camelcase
-          defer.reject(errors.authError);
-        };
-
-        map = new google.maps.Map(config.container, mapOptions);
-        map.centerMarker = new google.maps.Marker({
-          map: map,
-          position: map.getCenter()
-        });
-
-        google.maps.event.addDomListener(
-          window,
-          'resize',
-          debounce(function() {
-            google.maps.event.trigger(map, 'resize');
-            map.setCenter(center);
-          }, 250)
-        );
-
-        return defer.resolve(map);
-      });
-    });
-  }
+const selectors$8 = {
+  productForm: '[data-product-form]',
+  media: '[data-media]',
+  singleMedia: '[data-media-image]',
 };
 
-/*
+class Product {
+  constructor(container) {
+    this.container = container;
 
-Map Section
---------------------------------------------------------------------------------
-Loads a static map in the background of the section
+    this._prepareGallery();
 
-*/
-
-// Libs
-var selectors$20 = {
-  map: '.map-section__container',
-  mapError: '.map-section__error-message'
-};
-
-var classes$18 = {
-  mapError: 'map-section--load-error'
-};
-
-sections.register('map', {
-  onLoad: function() {
-    this.$container = $(this.container);
-    this.$map = $(selectors$20.map, this.$container);
-    this.key = this.$map.data('api-key');
-
-    if (typeof this.key !== 'string' || this.key === '') return;
-
-    var config = {
-      key: this.key,
-      container: this.$map[0],
-      address: this.$map.data('address-setting')
-    };
-
-    utils
-      .promiseStylesheet()
-      .then(function() {
-        return googleMaps.promiseMap(config);
-      })
-      .then(
-        function(map) {
-          this.map = map;
-        }.bind(this)
-      )
-      .catch(
-        function(error) {
-          this.$container.addClass(classes$18.mapError);
-
-          // Only show error in the theme editor
-          if (Shopify.designMode) {
-            $(selectors$20.mapError, this.$container)
-              .html(error)
-              .css('display', 'inline-block');
-          }
-        }.bind(this)
-      );
-  }
-});
-
-/*
-
-Newsletter Section
---------------------------------------------------------------------------------
-Overrides default HTML5 error checking for the newsletter section.
-
-*/
-
-// Libs
-var selectors$21 = {
-  emailField: '#EmailField',
-  inputGroup: '.input-group--underline',
-  submitButton: '.btn--newsletter__submit',
-  newsletterMessage: '.newsletter__message'
-};
-
-var errors$1 = {
-  blankError: theme.strings.newsletter && theme.strings.newsletter.blankError,
-  invalidError:
-    theme.strings.newsletter && theme.strings.newsletter.invalidError
-};
-
-sections.register('newsletter', {
-  onLoad: function() {
-    if ($('html').hasClass('is-ios') && Shopify.designMode) {
-      $(selectors$21.inputGroup, this.$container).addClass('has-animated');
-    }
-
-    this.$container.on(
-      'click',
-      selectors$21.submitButton,
-      this._checkEmail.bind(this)
+    const productFormElement = this.container.querySelector(
+      selectors$8.productForm
     );
+
+    if (!productFormElement) return;
+    this._setupEventListeners();
+    this.productForm = new ProductForm$$1(this.container);
+    this.productForm.init();
+  }
+
+  destroy() {
+    if (this.productForm) this.productForm.destroy();
+
+    this.container.removeEventListener(
+      'formOptionChanged',
+      this.eventHandlers.onFormOptionChange
+    );
+
+    const hasGallery = Boolean(this.gallery);
+    if (!hasGallery) return;
+
+    this.gallery.destroy();
+  }
+
+  _getEventHandlers() {
+    return {
+      onFormOptionChange: this._onFormOptionChange.bind(this),
+    };
+  }
+
+  _setupEventListeners() {
+    this.eventHandlers = this._getEventHandlers();
+
+    this.container.addEventListener(
+      'formOptionChanged',
+      this.eventHandlers.onFormOptionChange
+    );
+  }
+
+  _prepareGallery() {
+    this.galleryElement = this.container.querySelector(selectors$8.media);
+    if (!this.galleryElement) return;
+
+    if (this.container.dataset.mediaType === 'gallery') {
+      this._initializeGallery();
+      return;
+    }
+
+    this._addGalleryMediaQueryListener();
+
+    if (this.galleryMediaQueryListener.matches) {
+      this._initializeGallery();
+      this.gallery.addAccessibilityAttr();
+      return;
+    }
+
+    this._loadAllGalleryImages();
+  }
+
+  _addGalleryMediaQueryListener() {
+    this.galleryMediaQueryListener = window.matchMedia(
+      getMediaQueryString('large', 'max')
+    );
+
+    this.galleryMediaQueryListener.addListener((event) => {
+      if (event.matches) {
+        this._switchToGalleryMode();
+        return;
+      }
+
+      this._switchToStackedMode();
+    });
+  }
+
+  _switchToGalleryMode() {
+    const galleryWasJustInitialized = this._initializeGallery();
+    this.gallery.state.useAriaHidden = true;
+    this.gallery.hideMedia();
+    this.gallery.addAccessibilityAttr();
+
+    if (galleryWasJustInitialized) return;
+
+    this.gallery.bindEvents();
+  }
+
+  _switchToStackedMode() {
+    this._loadAllGalleryImages();
+    this.gallery.removeAccessibilityAttr();
+    this.gallery.resetTransformation();
+    this.gallery.state.useAriaHidden = false;
+    this.gallery.destroy();
+  }
+
+  _initializeGallery() {
+    if (this.gallery) {
+      this.gallery.applyTransformation();
+      window.setTimeout(() => this.gallery.enableTransition());
+      return false;
+    }
+
+    this.gallery = new Gallery(this.galleryElement);
+    this.gallery.init();
+    return true;
+  }
+
+  _loadAllGalleryImages() {
+    const images = this.container.querySelectorAll(selectors$8.singleMedia);
+
+    images.forEach((image) => {
+      if (!image.getAttribute('src')) {
+        image.setAttribute('src', image.getAttribute('data-src'));
+      }
+
+      if (!image.getAttribute('srcset')) {
+        image.setAttribute('srcset', image.getAttribute('data-srcset'));
+      }
+
+      // eslint-disable-next-line no-self-assign
+      image.outerHTML = image.outerHTML;
+    });
+
+    if (this.gallery) {
+      this.gallery.elements.images = Array.from(
+        this.gallery.elements.container.querySelectorAll(selectors$8.singleMedia)
+      );
+    }
+  }
+
+  _onFormOptionChange(event) {
+    const variant = event.detail.variant;
+
+    if (!variant) return;
+
+    if (!variant.featured_media || !this.gallery) return;
+    this.gallery.variantMediaSwitch(variant.featured_media.id);
+
+    if (this.galleryMediaQueryListener) {
+      if (this.galleryMediaQueryListener.matches) return;
+
+      this.gallery.resetTransformation();
+    }
+  }
+}
+
+sections.register('product', {
+  onLoad() {
+    this.product = new Product(this.container);
   },
 
-  _checkEmail: function() {
-    var emailFieldID =
-      selectors$21.emailField + this.$container.data('section-id');
-    var $emailField = $(emailFieldID, this.$container);
-    var $newsletterMessage = $(selectors$21.newsletterMessage, this.$container);
-    var errorMessage;
-    var emailValue = $emailField[0].value;
-    var emailRegExp = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
-
-    if (emailValue === '') {
-      errorMessage = errors$1.blankError;
-    } else if (!emailRegExp.test(emailValue)) {
-      errorMessage = errors$1.invalidError;
-    }
-
-    if (typeof errorMessage !== 'undefined') {
-      $newsletterMessage.html('<p class="errors">' + errorMessage + '</p>');
-      return false;
-    } else {
-      $newsletterMessage.html('');
-    }
-  }
+  onUnload() {
+    this.product.destroy();
+  },
 });
 
-/*
+// eslint-disable-next-line import/no-cycle
+const selectors$15 = {
+  productCollectionTitle: '[data-product-collection-title]',
+  productImage: '[data-media-image]',
+  productRecommendationsContainer: '[product-recommendations-container]',
+  productTemplate: '[data-product-template]',
+  productViewCartLink: '[data-product-view-cart-link]',
+  productModal: '[data-product-modal]',
+};
 
-Product Recommendations Section
---------------------------------------------------------------------------------
-Creates a staggered card grid for the product recommendations section.
+const classes$12 = {
+  hidden: 'hidden',
+  isOpen: 'is-open',
+  productModalNoMedia: 'product-modal--no-media',
+};
 
-*/
-
-// Libs
-var selectors$22 = {
-  productRecommendationSlider: '[data-recommendations-slider]',
-  productRecommendationSlides: '[data-recommendations-slide]',
-  indicatorsWrapper: '[data-recommendations-indicators]',
-  indicator: '[data-recommendations-indicator]',
-  productRecommendationIndicatorIndex: function(index) {
-    return '[data-product-recommendation-indicator-index="' + index + '"]';
+class ProductModal {
+  constructor(productContainer, productModalContent, collectionTitle) {
+    this.elements = { productContainer, productModalContent };
+    this.collectionTitle = collectionTitle || '';
   }
+
+  init() {
+    this.elements.productModal = document.querySelector(selectors$15.productModal);
+    if (!this.elements.productModal) return;
+    this.eventHandlers = this._getEventHandlers();
+  }
+
+  setupProductModal(productUrl) {
+    this._getProductModalContent(productUrl)
+      .then((productTemplate) => {
+        // Set modal heading to collection title
+        this.elements.productModal.querySelector(
+          selectors$15.productCollectionTitle
+        ).textContent = this.collectionTitle;
+        this._setupProductModalContent(productTemplate);
+      })
+      .catch((error) => {
+        throw new Error(error);
+      });
+  }
+
+  _getEventHandlers() {
+    return {
+      hideModalShowCart: this._hideModalShowCart.bind(this),
+      hideProductModal: this._hideProductModal.bind(this),
+    };
+  }
+
+  _setupEventHandlers() {
+    this.elements.productContainer.addEventListener(
+      'popup_closed',
+      this.eventHandlers.hideProductModal
+    );
+
+    this.elements.viewCart = this.elements.productModalContent.querySelector(
+      selectors$15.productViewCartLink
+    );
+
+    if (!this.elements.viewCart) return;
+
+    this.elements.viewCart.addEventListener(
+      'click',
+      this.eventHandlers.hideModalShowCart
+    );
+  }
+
+  _updateSPRReviews() {
+    if (!window.SPR) return;
+
+    if (window.SPR.initDomEls && window.SPR.loadProducts) {
+      window.SPR.initDomEls();
+      window.SPR.loadProducts();
+    }
+  }
+
+  _getProductModalContent(productUrl) {
+    return fetch(productUrl)
+      .then((response) => response.text())
+      .then((text) => {
+        const parser = new DOMParser();
+        return parser.parseFromString(text, 'text/html');
+      })
+      .then((productHtml) => {
+        return productHtml;
+      })
+      .catch((error) => {
+        throw new Error(error);
+      });
+  }
+
+  _setupProductModalContent(productTemplate) {
+    this.elements.productModalContent.innerHTML = '';
+    this.elements.productModalContent.scrollTo(0, 0);
+
+    const productRecommendationsContainer = productTemplate.querySelector(
+      selectors$15.productRecommendationsContainer
+    );
+
+    const productSection = this._getProductSection(productTemplate);
+
+    this.elements.productModal.classList.toggle(
+      classes$12.productModalNoMedia,
+      !this._productHasMedia(productTemplate)
+    );
+
+    this.elements.productModalContent.appendChild(productSection);
+
+    if (productRecommendationsContainer) {
+      this._getProductRecommendations(productRecommendationsContainer)
+        .then((productRecommendationsSection) => {
+          this.elements.productModalContent.appendChild(
+            productRecommendationsSection
+          );
+
+          this.productRecommendations.resetSafariImages();
+
+          this.productPopup =
+            this.productPopup ||
+            window.popups.find((popup) => popup.name === 'product-modal');
+
+          this.productPopup.resetContainerFocus();
+        })
+        .catch((error) => {
+          throw new Error(error);
+        });
+    }
+
+    // to make srcset work on Safari, we need to reinsert the images
+    this.elements.productModalContent
+      .querySelectorAll(selectors$15.productImage)
+      /* eslint-disable-next-line no-self-assign */
+      .forEach((image) => (image.outerHTML = image.outerHTML));
+
+    this._showProductModal(productSection);
+    this._updateSPRReviews();
+    this._setupEventHandlers();
+  }
+
+  _getProductSection(productTemplate) {
+    const productSection = productTemplate.querySelector(
+      selectors$15.productTemplate
+    );
+
+    return productSection;
+  }
+
+  _getProductRecommendations(productRecommendationsContainer) {
+    this.productRecommendations = new ProductRecommendations(
+      productRecommendationsContainer
+    );
+    this.productRecommendations.init();
+
+    return this.productRecommendations.setupAndGetHTML();
+  }
+
+  _productHasMedia(productTemplate) {
+    return productTemplate.querySelectorAll(selectors$15.productImage).length;
+  }
+
+  _showProductModal(productTemplate) {
+    this.product = new Product(productTemplate);
+
+    this.productPopup =
+      this.productPopup ||
+      window.popups.find((popup) => popup.name === 'product-modal');
+
+    if (window.Shopify && Shopify.PaymentButton) {
+      Shopify.PaymentButton.init();
+    }
+
+    if (this.productPopup.elements.stage.classList.contains(classes$12.isOpen))
+      return;
+
+    this.productPopup.openPopup({
+      currentTarget: this.elements.productContainer,
+    });
+  }
+
+  _hideModalShowCart(event) {
+    event.preventDefault();
+
+    this.cartPopup =
+      this.cartPopup || window.popups.find((popup) => popup.name === 'cart');
+
+    this.productPopup.closePopup();
+    this.cartPopup.openPopup({
+      currentTarget: this.productPopup.elements.triggerNode,
+    });
+
+    this._hideProductModal();
+
+    if (!this.elements.viewCart) return;
+
+    this.elements.viewCart.removeEventListener(
+      'click',
+      this.eventHandlers.hideModalShowCart
+    );
+  }
+
+  _hideProductModal() {
+    this.elements.productModalContent.innerHTML = '';
+    this.elements.productModalContent.classList.remove(
+      classes$12.productModalContentNoMedia
+    );
+    this.product.destroy();
+
+    this.elements.productContainer.removeEventListener(
+      'popup_closed',
+      this.eventHandlers.hideProductModal
+    );
+  }
+}
+
+// eslint-disable-next-line import/no-cycle
+const selectors$14 = {
+  productCardLink: '[data-product-card-link]',
+  productForm: '[data-product-form]',
+  productOption: '[data-product-option]',
+  showOptionsButton: '[data-show-options-button]',
 };
 
-var classes$19 = {
-  indicatorActive: 'product-recommendations__slide-indicator--active'
+const classes$11 = {
+  hidden: 'hidden',
+  productCardFormExpanded: 'product-card--form-expanded',
 };
 
-var mobileMediaQuery = '(max-width: 749px)';
+class ProductCard {
+  constructor(productCard, productModalContent, collectionTitle) {
+    this.elements = { productCard, productModalContent };
+    this.collectionTitle = collectionTitle;
+  }
+
+  init() {
+    Object.assign(this.elements, this._getElements());
+    this._setupEventHandlers();
+
+    this.productModal = new ProductModal(
+      this.elements.productCard,
+      this.elements.productModalContent,
+      this.collectionTitle
+    );
+    this.productModal.init();
+
+    if (!this.elements.productForm) return;
+
+    this.productForm = new ProductForm$$1(this.elements.productCard);
+    this.productForm.init();
+  }
+
+  _getElements() {
+    return {
+      productCardLinks: this.elements.productCard.querySelectorAll(
+        selectors$14.productCardLink
+      ),
+      productForm: this.elements.productCard.querySelector(
+        selectors$14.productForm
+      ),
+      showOptionsButton: this.elements.productCard.querySelector(
+        selectors$14.showOptionsButton
+      ),
+    };
+  }
+
+  _getEventHandlers() {
+    return {
+      onProductLinkClick: this._onProductLinkClick.bind(this),
+    };
+  }
+
+  _setupEventHandlers() {
+    this.eventHandlers = this._getEventHandlers();
+
+    if (this.elements.showOptionsButton) {
+      this.elements.showOptionsButton.addEventListener('click', () => {
+        this._toggleShowOptions(true);
+      });
+
+      this.elements.productCard.addEventListener('mouseleave', (event) => {
+        if (!event.relatedTarget) return;
+        this._toggleShowOptions(false);
+      });
+
+      this.elements.productCard.addEventListener('focusout', (event) => {
+        if (
+          !event.relatedTarget ||
+          this.elements.productCard.contains(event.relatedTarget)
+        )
+          return;
+
+        this._toggleShowOptions(false);
+      });
+    }
+
+    if (!this.elements.productCardLinks || !this.elements.productModalContent)
+      return;
+
+    this.elements.productCardLinks.forEach((productCardLink) =>
+      productCardLink.addEventListener(
+        'click',
+        this.eventHandlers.onProductLinkClick
+      )
+    );
+  }
+
+  _toggleShowOptions(show) {
+    this.elements.productCard.classList.toggle(
+      classes$11.productCardFormExpanded,
+      show
+    );
+    this.elements.showOptionsButton.classList.toggle(classes$11.hidden, show);
+
+    if (!show) return;
+
+    const firstOption = this.elements.productForm.querySelector(
+      selectors$14.productOption
+    );
+    if (!firstOption) return;
+
+    firstOption.focus();
+  }
+
+  _onProductLinkClick(event) {
+    event.preventDefault();
+
+    const productUrl =
+      event.currentTarget.href ||
+      event.currentTarget.dataset.productCardLinkUrl;
+
+    this.productModal.setupProductModal(productUrl);
+  }
+}
+
+// eslint-disable-next-line import/no-cycle
+const selectors$13 = {
+  productCard: '[data-product-card]',
+  productCardImage: '[data-product-card-image]',
+  productModalContent: '[data-product-modal-content]',
+  productRecommendations: '[data-product-recommendations]',
+};
+
+class ProductRecommendations {
+  constructor(container, setupRecommendationsOnInit = false) {
+    this.elements = { container };
+    this.setupRecommendationsOnInit = setupRecommendationsOnInit;
+    this.recommendationsLoaded = false;
+    this.isProductModalEnabled = Boolean(
+      this.elements.container.dataset.productModal
+    );
+    this.isQuickAddEnabled = Boolean(this.elements.container.dataset.quickAdd);
+  }
+
+  init() {
+    Object.assign(this.elements, this._getElements());
+
+    if (this.setupRecommendationsOnInit) {
+      this._setupProductRecommendations();
+    }
+  }
+
+  setupAndGetHTML() {
+    return new Promise((resolve, reject) => {
+      this._getProductRecommendationsHTML()
+        .then((productRecommendationsHtml) => {
+          this._showProductRecommendations(productRecommendationsHtml, false);
+
+          if (this.recommendationsLoaded) {
+            resolve(this.elements.container);
+          } else {
+            const error = 'Product recommendations are not available';
+            reject(error);
+          }
+        })
+        .catch((error) => {
+          throw new Error(error);
+        });
+    });
+  }
+
+  resetSafariImages() {
+    const images = this.elements.container.querySelectorAll(
+      selectors$13.productCardImage
+    );
+
+    // to make srcset work on Safari, we need to reinsert the images
+    images
+      /* eslint-disable-next-line no-self-assign */
+      .forEach((image) => (image.outerHTML = image.outerHTML));
+  }
+
+  _getProductRecommendationsHTML() {
+    const baseUrl = this.elements.container.dataset.baseUrl;
+    const productId = this.elements.container.dataset.productId;
+    const productRecommendationsUrl = `${baseUrl}?section_id=product-recommendations&product_id=${productId}&limit=4`;
+
+    return fetch(productRecommendationsUrl)
+      .then((response) => response.text())
+      .then((text) => {
+        const parser = new DOMParser();
+        return parser.parseFromString(text, 'text/html');
+      })
+      .catch((error) => {
+        throw new Error(error);
+      });
+  }
+
+  _showProductRecommendations(productRecommendationsHtml, resetImages = true) {
+    const productRecommendations = productRecommendationsHtml.querySelector(
+      selectors$13.productRecommendations
+    );
+
+    if (!productRecommendations) return;
+    this.elements.container.appendChild(productRecommendations);
+
+    this._setupProductCards();
+
+    if (resetImages) {
+      this.resetSafariImages();
+    }
+
+    this.recommendationsLoaded = true;
+  }
+
+  _getElements() {
+    return {
+      productModalContent: document.querySelector(
+        selectors$13.productModalContent
+      ),
+    };
+  }
+
+  _setupProductRecommendations() {
+    this._getProductRecommendationsHTML().then((productRecommendationsHtml) => {
+      this._showProductRecommendations(productRecommendationsHtml);
+    });
+  }
+
+  _setupProductCards() {
+    theme.cartQuantity.updateQuantityIndicatorElements(
+      false,
+      this.elements.container
+    );
+
+    if (!this.isProductModalEnabled && !this.isQuickAddEnabled) return;
+
+    const productCards = this.elements.container.querySelectorAll(
+      selectors$13.productCard
+    );
+
+    productCards.forEach((cardElement) => {
+      const productCard = new ProductCard(
+        cardElement,
+        this.elements.productModalContent,
+        ''
+      );
+
+      productCard.init();
+    });
+  }
+}
 
 sections.register('product-recommendations', {
-  onLoad: function() {
-    this.didShowRecommendations = false;
-
-    var baseUrl = this.$container.data('baseUrl');
-    var productId = this.$container.data('productId');
-    var recommendationsSectionUrl =
-      baseUrl +
-      '?section_id=product-recommendations&product_id=' +
-      productId +
-      '&limit=4';
-
-    utils
-      .promiseStylesheet()
-      .then(function() {
-        return $.get(recommendationsSectionUrl);
-      })
-      .then(
-        function(section) {
-          var recommendationsMarkup = $(section).html();
-          if (recommendationsMarkup.trim() !== '') {
-            this.$container.html(recommendationsMarkup);
-            this._initProductRecommendations();
-
-            this.didShowRecommendations = true;
-          }
-        }.bind(this)
-      );
-  },
-
-  _initProductRecommendations: function() {
-    this.eventHandlers = {};
-    this.mql = window.matchMedia(mobileMediaQuery);
-    this._setupEventHandlers();
-    this._mediaQueryHandler();
-  },
-
-  _setupEventHandlers: function() {
-    this.eventHandlers._mediaQueryHandler = this._mediaQueryHandler.bind(this);
-    this.eventHandlers._updateIndicatorActiveState = this._updateIndicatorActiveState.bind(
-      this
+  onLoad() {
+    this.productRecommendations = new ProductRecommendations(
+      this.container,
+      true
     );
-
-    this.mql.addListener(this.eventHandlers._mediaQueryHandler);
+    this.productRecommendations.init();
   },
-
-  _mediaQueryHandler: function() {
-    if (this.mql.matches) {
-      this._initializeMobileSlider();
-    } else {
-      this._destroyMobileSlider();
-    }
-  },
-
-  _initializeMobileSlider: function() {
-    this.$slider =
-      this.$slider ||
-      this.$container.find(selectors$22.productRecommendationSlider);
-    this.$slides =
-      this.$slides || this.$slider.find(selectors$22.productRecommendationSlides);
-
-    // Don't init the slider if we have less than 2 slides
-    if (this.$slides.length < 2) {
-      return;
-    }
-
-    this.$indicatorsWrapper =
-      this.$indicatorsWrapper ||
-      this.$container.find(selectors$22.indicatorsWrapper);
-
-    this.$indicators =
-      this.$indicators || this.$indicatorsWrapper.find(selectors$22.indicator);
-
-    this.$slider.on(
-      'scroll',
-      { passive: true },
-      this.eventHandlers._updateIndicatorActiveState
-    );
-
-    this._updateIndicatorActiveState();
-  },
-
-  _destroyMobileSlider: function() {
-    if (!this.$slider) {
-      return;
-    }
-
-    this.$slider.off('scroll');
-  },
-
-  _updateIndicatorActiveState: function() {
-    this.$indicators.removeClass(classes$19.indicatorActive);
-
-    var scrollLeft = this.$slider.scrollLeft();
-    var numberOfSlides = this.$slides.length;
-    var slideWidth = this.$slider[0].scrollWidth / numberOfSlides;
-    var activeIndicatorIndex = Math.round(scrollLeft / slideWidth) + 1;
-
-    var $indicator = this.$container.find(
-      selectors$22.productRecommendationIndicatorIndex(activeIndicatorIndex)
-    );
-
-    $indicator.addClass(classes$19.indicatorActive);
-  },
-
-  onUnload: function() {
-    if (!this.didShowRecommendations) {
-      return;
-    }
-
-    this.mql.removeListener(this.eventHandlers._mediaQueryHandler);
-    this._destroyMobileSlider();
-  }
 });
 
-/*
-
-Product Slideshow Extension
---------------------------------------------------------------------------------
-Adds the product slideshow functionality to a section
-
-Events
----------
-
-Name: product_slideshow_show
-Description: Fired when the slideshow is opened
-Payload: none
-
-Name: product_slideshow_hide
-Description: Fired when the slideshow is closed
-Payload: none
-
-Name: product_slideshow_set_slide
-Description: Fired when the slide is being set
-Payload: { number } Index of the slide
-
-Name: product_slideshow_next
-Description: Fired when the next button is clicked
-Payload: none
-
-Name: product_slideshow_previous
-Description: Fired when the previous button is clicked
-Payload: none
-
-*/
-
-var classes$21 = {
-  lazypreload: 'lazypreload',
-  showProductSlideshow: 'product-slideshow--show',
-  productSlideshowSelectActive: 'product-slideshow__slide-select--active'
+const selectors$17 = {
+  stickyElement: '[data-sticky-element]',
+  stickySentinelTop: '[data-sticky-sentinel-top]',
+  stickySentinelBottom: '[data-sticky-sentinel-bottom]',
 };
 
-var selectors$24 = {
-  slider: '[data-product-slider]',
-  productSlideshow: '[data-product-slideshow]',
-  productSlideshowOpen: '[data-product-slideshow-open]',
-  productSlideshowSlide: '[data-product-slideshow-slide]',
-  productSlideshowImage: '[data-product-slideshow-image]',
-  productSlideshowNext: '[data-product-slideshow-next]',
-  productSlideshowSelect: '[data-product-slideshow-select]',
-  productSlideshowPrevious: '[data-product-slideshow-previous]',
-  productSlideshowClose: '[data-product-slideshow-close]',
-  productMediaTypeVideo: '[data-product-media-type-video]',
-  plyrAspectRatio: '[data-plyr-aspect-ratio]'
+const classes$14 = {
+  stickyContainer: 'sticky__container',
+  stickySentinel: 'sticky__sentinel',
+  stickySentinelTop: 'sticky__sentinel--top',
+  stickySentinelBottom: 'sticky__sentinel--bottom',
+  stickyElement: 'sticky__element',
 };
 
-var attributes$2 = {
-  productMediaTypeModel: 'data-product-media-type-model'
-};
-
-var productSlideshow = {
-  init: function() {
-    this.$productSlideshow = $(selectors$24.productSlideshow, this.$container);
-    this.$slideshowSelect = $(selectors$24.productSlideshowSelect);
-
-    this.translateDistance = 0;
-
-    this.dotSettings = {
-      maxVisibleDots: 9,
-      dotWidth: 16
-    };
-
-    this.extend(productModel);
-    this.extend(productVideo);
-
-    this.initModelViewers(this.$productSlideshow);
-    this.initProductVideos(this.$productSlideshow);
-
-    $(window).on(
-      'resize',
-      debounce(
-        function() {
-          this.adjustPlyrMaxWidth();
-        }.bind(this),
-        100
-      )
-    );
-
-    // If there are not enough images on the page we won't have a slideshow, so
-    // return.
-    if (this.$productSlideshow.length === 0) return;
-
-    $(selectors$24.productSlideshowOpen).on(
-      'click',
-      this._onImageClick.bind(this)
-    );
-
-    // The product slideshow is shipped from the server inside the product template
-    // section HTML. For styling reasons, the slideshow HTML needs to live as
-    // the last child of body.
-    this.$productSlideshow.appendTo(document.body);
-
-    // Check how many slides we have for the slideshow. If we only have one, then
-    // we don't need any slide controls, so no need to initialize the Slider() lib
-    this.slideCount = $(
-      selectors$24.productSlideshowSlide,
-      this.$productSlideshow
-    ).length;
-
-    if (this.slideCount) {
-      this.slider = new Slider($(selectors$24.slider, this.$productSlideshow));
-
-      this.slider.$slides.on(
-        'mediaSlideIsDraggable',
-        function(event, isDraggable) {
-          this.slider.setIsDraggable(isDraggable);
-        }.bind(this)
-      );
-    }
-  },
-
-  showSlideshow: function() {
-    this.trigger('product_slideshow_show');
-
-    // Cache the image that was clicked so that when we close the slideshow, we
-    // can return the focus to it.
-    this.$slideshowOpenFocus = $(document.activeElement);
-
-    // Add the lazysizes preload class so that we start preloading all slideshow
-    // images
-    $(selectors$24.productSlideshowImage, this.$productSlideshow).addClass(
-      classes$21.lazypreload
-    );
-
-    // Get the header section so that we can turn off the scroll handling so that
-    // it doesn't disappear when we open the slideshow.
-    return sections.getInstances('header-section').then(
-      function(instances) {
-        instances[0].scrollHandler = false;
-
-        this._assignEventHandlers();
-
-        a11y$1.trapFocus({
-          $container: this.$productSlideshow,
-          namespace: 'product-slideshow'
-        });
-
-        this.$productSlideshow
-          .addClass(classes$21.showProductSlideshow)
-          .attr('aria-hidden', false);
-
-        this.adjustPlyrMaxWidth();
-
-        utils.disableScrollBody();
-        utils.enableTabbingOfChildren(this.$productSlideshow);
-      }.bind(this)
-    );
-  },
-
-  hideSlideshow: function() {
-    this.trigger('product_slideshow_hide');
-
-    return sections.getInstances('header-section').then(
-      function(instances) {
-        instances[0].scrollHandler = true;
-        this._removeEventHandlers();
-
-        a11y$1.removeTrapFocus({ namespace: 'product-slideshow' });
-
-        utils.enableScrollBody();
-        utils.disableTabbingOfChildren(this.$productSlideshow);
-
-        this.$productSlideshow
-          .removeClass(classes$21.showProductSlideshow)
-          .attr('aria-hidden', true);
-        this.$slideshowOpenFocus.focus();
-
-        this.slider.$currentSlide.trigger('mediaHidden');
-        this.updateShopifyXr();
-      }.bind(this)
-    );
-  },
-
-  setSlide: function(id) {
-    if (this.slideCount <= 1) return;
-
-    var index = this._getSlideIndex(id);
-
-    this.trigger('product_slideshow_set_slide', [index]);
-
-    return this.slider.setSlide(index); // eslint-disable-line consistent-return
-  },
-
-  adjustPlyrMaxWidth: function() {
-    $(selectors$24.plyrAspectRatio).each(function() {
-      var $aspectRatioContainer = $(this);
-
-      var aspectRatioValue = parseFloat(
-        $aspectRatioContainer.data('plyr-aspect-ratio')
-      );
-
-      var parentHeight = $(
-        $aspectRatioContainer.closest(selectors$24.productMediaTypeVideo)
-      ).height();
-
-      var maxWidth = parentHeight * aspectRatioValue;
-
-      $aspectRatioContainer.css('max-width', maxWidth + 'px');
-    });
-  },
-
-  _onImageClick: function(evt) {
-    // By default the image is a link, so prevent going to the image link
-    evt.preventDefault();
-    var id = $(evt.currentTarget).data('media-id');
-    this.setSlide(id);
-    this.showSlideshow();
-    this._triggerMediaVisible(id);
-  },
-
-  _triggerMediaVisible: function(id) {
-    var $currentSlide = $(
-      selectors$24.productSlideshowSlide,
-      this.$productSlideshow
-    ).filter('[data-media-id="' + id + '"]');
-
-    if (!$currentSlide) return;
-    $currentSlide.trigger('mediaVisible');
-  },
-
-  _assignEventHandlers: function() {
-    // Use `.one()` instead of `.on()` because we want to listen and respond
-    // to one key input at a time. For example, if you hit the forward arrow button
-    // really fast while the slide is still animating, we don't want it to keep
-    // animating for all the times that you mashed the key.
-    $(document).one('keyup.product-slideshow', this._onKeyup.bind(this));
-
-    this.$productSlideshow
-      .on(
-        'slidetransitionend',
-        function(evt, data) {
-          this._setSlideIndicator(evt, data);
-
-          var currentMediaId = data.$currentSlide.data('media-id');
-          $(this.slider.$slides)
-            .filter(":not([data-media-id='" + currentMediaId + "'])")
-            .trigger('mediaHidden');
-
-          var isCurrentSlideModel = data.$currentSlide[0].hasAttribute(
-            attributes$2.productMediaTypeModel
-          );
-
-          if (isCurrentSlideModel && utils.isTouch()) {
-            this.updateShopifyXr(this.id, currentMediaId);
-            this.slider.setIsDraggable(true);
-          } else if (isCurrentSlideModel) {
-            this.updateShopifyXr(this.id, currentMediaId);
-          } else {
-            this.updateShopifyXr(this.id);
-            this.slider.setIsDraggable(true);
-          }
-        }.bind(this)
-      )
-      .on('click', selectors$24.productSlideshowSelect, this._setSlide.bind(this))
-      .on(
-        'keyup',
-        selectors$24.productSlideshowSelect,
-        this._handleMediaFocus.bind(this)
-      )
-      .one(
-        'click',
-        selectors$24.productSlideshowClose,
-        this.hideSlideshow.bind(this)
-      )
-      .one('click', selectors$24.productSlideshowNext, this._nextSlide.bind(this))
-      .one(
-        'click',
-        selectors$24.productSlideshowPrevious,
-        this._previousSlide.bind(this)
-      );
-  },
-
-  _removeEventHandlers: function() {
-    this.$productSlideshow.off();
-    $(document).off('.product-slideshow');
-  },
-
-  _getSlideIndex: function(id) {
-    return $(selectors$24.productSlideshowSlide, this.$productSlideshow)
-      .filter('[data-media-id="' + id + '"]')
-      .index();
-  },
-
-  _handleMediaFocus: function(evt) {
-    if (
-      evt.keyCode !== utils.keyboardKeys.ENTER &&
-      evt.keyCode !== utils.keyboardKeys.SPACE
-    )
-      return;
-
-    var slideIndex = $(evt.currentTarget).index();
-    var $slide = $(this.slider.$slides[slideIndex]);
-
-    var $plyrOrModel = $slide.find('model-viewer, .plyr');
-    if ($plyrOrModel.length) {
-      $plyrOrModel.first().focus();
-    } else {
-      $slide.focus();
-    }
-  },
-
-  _setSlide: function(evt) {
-    var $navButton = $(evt.target);
-    var index = $navButton.index();
-
-    this.trigger('product_slideshow_set_slide', [index]);
-    this.slider.setSlide(index);
-  },
-
-  _nextSlide: function() {
-    this.trigger('product_slideshow_next');
-    this.trigger('product_slideshow_set_slide', [
-      this.slider.$nextSlide.index()
-    ]);
-
-    return this.slider.nextSlide().then(
-      function() {
-        this.$productSlideshow.one(
-          'click',
-          selectors$24.productSlideshowNext,
-          this._nextSlide.bind(this)
-        );
-      }.bind(this)
-    );
-  },
-
-  _previousSlide: function() {
-    this.trigger('product_slideshow_previous');
-    this.trigger('product_slideshow_set_slide', [
-      this.slider.$previousSlide.index()
-    ]);
-
-    return this.slider.previousSlide().then(
-      function() {
-        this.$productSlideshow.one(
-          'click',
-          selectors$24.productSlideshowPrevious,
-          this._previousSlide.bind(this)
-        );
-      }.bind(this)
-    );
-  },
-
-  _setSlideIndicator: function(evt, data) {
-    var index = data.$currentSlide.index();
-
-    $(selectors$24.productSlideshowSelect, this.$productSlideshow)
-      .eq(index)
-      .addClass(classes$21.productSlideshowSelectActive)
-      .siblings()
-      .removeClass(classes$21.productSlideshowSelectActive);
-
-    this.translateDots(index);
-  },
-
-  translateDots: function(index) {
-    var settings = this.dotSettings;
-
-    if (this.slideCount <= settings.maxVisibleDots) return;
-
-    var maxTranslateDistance =
-      (this.slideCount - settings.maxVisibleDots) * settings.dotWidth;
-
-    if (index >= settings.maxVisibleDots - 1) {
-      var calculatedTranslateDistance =
-        (index + 2 - settings.maxVisibleDots) * settings.dotWidth;
-
-      calculatedTranslateDistance =
-        maxTranslateDistance < calculatedTranslateDistance
-          ? maxTranslateDistance
-          : calculatedTranslateDistance;
-
-      this.translateDistance = -calculatedTranslateDistance;
-    } else {
-      this.translateDistance = 0;
-    }
-
-    this.$slideshowSelect.css(
-      'transform',
-      'translateX(' + this.translateDistance + 'px)'
-    );
-  },
-
-  _onKeyup: function(evt) {
-    // Assign the default transition value to be a resolved promise so that if
-    // we don't end up assigning a real transition (next, prev, esc) then we
-    // immediately attach another keyup event handler.
-    var promiseTransition = $.Deferred().resolve();
-    var shouldPreventSlide = this.slider.shouldPreventSlide(
-      evt.target,
-      ['.plyr', '.shopify-model-viewer-ui'],
-      this.slideCount
-    );
-
-    switch (evt.keyCode) {
-      case 37:
-        if (shouldPreventSlide) break;
-
-        promiseTransition = this.slider.previousSlide();
-        break;
-      case 39:
-        if (shouldPreventSlide) break;
-
-        promiseTransition = this.slider.nextSlide();
-        break;
-      case 27:
-        this.hideSlideshow();
-        promiseTransition = $.Deferred().reject();
-        break;
-    }
-
-    promiseTransition.then(
-      function() {
-        // When the transition is done, then start listening for a keyup event again
-        $(document).one('keyup', this._onKeyup.bind(this));
-      }.bind(this)
-    );
+class StickyElement {
+  constructor(container) {
+    this.container = container;
   }
-};
 
-/*
+  init() {
+    if (!isIntersectionObserverAvailable()) return;
 
-Product Template Section
---------------------------------------------------------------------------------
-Shows a product and allows the user to select product variants and add the product
-to their cart. Adds a product media slideshow that can be viewed when you select
-a media on the page. Adds expanding social sharing buttons.
+    this.stickyElement = this.container.querySelector(selectors$17.stickyElement);
+    if (!this.stickyElement) return;
 
-*/
-
-// Extensions
-// Libs
-var selectors$23 = {
-  productFormWrapper: '.product__form-wrapper',
-  productDescription: '.product__description'
-};
-
-var classes$20 = {
-  productFormFixed: 'product__form-wrapper--fixed',
-  productFormBottom: 'product__form-wrapper--bottom'
-};
-
-var formStickyTop = 80;
-
-sections.register('product-template', {
-  onLoad: function() {
-    this.coverPosition = 'top';
-
-    this.extend(productSlideshow);
-    this.extend(socialSharing);
-    this.extend(productDisplay);
-
-    this.window().on('scroll', this._setFormPosition.bind(this));
-    this.window().on(
-      'resize',
-      debounce(this._callResizeFunctions.bind(this), 500)
-    );
-
-    this.on('variant_add_to_cart', this._updateMeasurements.bind(this));
-    this.on('variant_change', this._updateHistoryState.bind(this));
-
-    this.document().on(
-      'drawer_open_start',
-      this._handleFixedSideImage.bind(this)
-    );
-    this.document().on(
-      'drawer_close_done',
-      this._resetFixedSideImage.bind(this)
-    );
-
-    utils.promiseStylesheet().then(
-      function() {
-        this._updateMeasurements();
-      }.bind(this)
-    );
-  },
-
-  _callResizeFunctions: function() {
-    this._updateMeasurements();
-    this._formatVariantSelectors();
-  },
-
-  _handleFixedSideImage: function() {
-    if (this.coverPosition !== 'fixed') return;
-
-    var scrollTop = $(window).scrollTop();
-    var translate = scrollTop - this.fixedTop + 2 * formStickyTop + 28;
-
-    $(selectors$23.productFormWrapper, this.$container).css({
-      transform: 'translateY(' + translate + 'px)',
-      position: 'absolute'
-    });
-  },
-
-  _resetFixedSideImage: function() {
-    if (this.coverPosition !== 'fixed') return;
-
-    $(selectors$23.productFormWrapper, this.$container).css({
-      transform: '',
-      position: ''
-    });
-  },
-
-  _updateHistoryState: function(event, instance, product, variant) {
-    if (!history.replaceState) return;
-
-    var newurl =
-      window.location.protocol +
-      '//' +
-      window.location.host +
-      window.location.pathname +
-      '?variant=' +
-      variant.id;
-    window.history.replaceState({ path: newurl }, '', newurl);
-  },
-
-  _setFormPosition: function() {
-    if (utils.isMobile() || !this.enableSticky) return;
-
-    var scrollTop = $(window).scrollTop();
-
-    // Debounce DOM edits to next frame with requestAnimationFrame
-    requestAnimationFrame(
-      function() {
-        if (scrollTop > this.fixedTop) {
-          if (scrollTop > this.fixedBottom) {
-            // Fix to bottom
-            this.coverPosition = 'bottom';
-            $(selectors$23.productFormWrapper)
-              .css('width', this.formWidth)
-              .removeClass(classes$20.productFormFixed)
-              .addClass(classes$20.productFormBottom);
-          } else {
-            // Fix to the side
-            this.coverPosition = 'fixed';
-            $(selectors$23.productFormWrapper)
-              .css('width', this.formWidth)
-              .addClass(classes$20.productFormFixed)
-              .removeClass(classes$20.productFormBottom);
-          }
-        } else {
-          // Fix to the top
-          this.coverPosition = 'top';
-          $(selectors$23.productFormWrapper)
-            .css('width', '')
-            .removeClass(classes$20.productFormFixed)
-            .removeClass(classes$20.productFormBottom);
-        }
-      }.bind(this)
-    );
-  },
-
-  _updateMeasurements: function() {
-    var $formWrapper = $(selectors$23.productFormWrapper);
-    var descriptionHeight = $(selectors$23.productDescription).outerHeight(true);
-    var formHeight = $formWrapper.height();
-
-    this.enableSticky = descriptionHeight > formHeight;
-
-    if (!this.enableSticky) return;
-
-    this.fixedTop = $formWrapper.parent().offset().top - formStickyTop;
-    this.fixedBottom = this.fixedTop + descriptionHeight - formHeight;
-    this.formWidth = $formWrapper.parent().width();
-
-    this._setFormPosition();
+    this.sticky = false;
+    this._addSentinels();
+    this._observeTopSentinel();
+    this._observeBottomSentinel();
   }
-});
 
-var selectors$25 = {
-  slider: '.quotes-slider',
-  slide: '.quotes-slide'
-};
-
-var classes$22 = {
-  visible: 'quotes-slide--visible'
-};
-
-sections.register('quotes-section', {
-  onLoad: function() {
-    this.$container = $(this.container);
-    this.$slider = $(selectors$25.slider, this.$container);
-    this.totalSlides = this.$slider.data('count');
-    this.speed = this.$slider.data('speed');
-    this.currentSlide = 0;
-
-    if (this.$slider.find(selectors$25.slide).length > 1) {
-      this._startSlider();
-    }
-  },
-
-  _startSlider: function() {
-    this.interval = setInterval(
-      function() {
-        if (this.currentSlide + 1 >= this.totalSlides) {
-          this.currentSlide = 0;
-        } else {
-          this.currentSlide++;
-        }
-
-        this._showSlide(selectors$25.slide + '--' + this.currentSlide);
-      }.bind(this),
-      this.speed
-    );
-  },
-
-  _showSlide: function(slide) {
-    this.$slider
-      .find(selectors$25.slide)
-      .removeClass(classes$22.visible)
-      .end()
-      .find(slide)
-      .addClass(classes$22.visible);
-  },
-
-  onBlockSelect: function(evt) {
-    clearInterval(this.interval);
-
-    var $selectedSlide = this.$container.find(
-      selectors$25.slide + '--' + evt.detail.blockId
-    );
-
-    this._showSlide($selectedSlide);
-  },
-
-  onBlockDeselect: function() {
-    this._startSlider();
+  destroy() {
+    if (this.topObserver) this.topObserver.disconnect();
+    if (this.bottomObserver) this.bottomObserver.disconnect();
   }
-});
 
-/*
-
-Search Template Section
---------------------------------------------------------------------------------
-Creates a staggered card grid for the search template.
-
-*/
-
-// Extensions
-// Libs
-sections.register('search-template', {
-  onLoad: function() {
-    this.extend(cardManager);
+  isSticky() {
+    return this.sticky;
   }
-});
 
-var promiseVimeoAPI;
-
-var vimeo = {
-  promiseAPI: function() {
-    if (!promiseVimeoAPI) {
-      promiseVimeoAPI = $.Deferred(function(defer) {
-        var tag = document.createElement('script');
-        tag.src = 'https://player.vimeo.com/api/player.js';
-        tag.onload = tag.onreadystatechange = function() {
-          if (!this.readyState || this.readyState === 'complete') {
-            defer.resolve();
-          }
-        };
-
-        var firstScriptTag = document.getElementsByTagName('script')[0];
-        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-        setTimeout(function() {
-          defer.reject('Request for Vimeo API timed out after 30 seconds.');
-        }, 30000);
-      });
-    }
-
-    return promiseVimeoAPI;
-  },
-
-  promisePlayer: function(id, options) {
-    return this.promiseAPI().then(function() {
-      return $.Deferred(function(defer) {
-        if (typeof window.Vimeo === 'undefined') {
-          defer.reject(
-            "We're sorry, something went wrong. The Vimeo API has not loaded correctly."
-          );
-        }
-
-        var player = new window.Vimeo.Player(id, options);
-
-        setTimeout(function() {
-          defer.reject(
-            'Request for Vimeo player has timed out after 30 seconds.'
-          );
-        }, 30000);
-
-        player.ready().then(function() {
-          defer.resolve(player);
-        });
-      });
-    });
-  }
-};
-
-/*
-
-Slideshow Desktop Extension
---------------------------------------------------------------------------------
-Manages all the desktop behaviour of the home page slideshow
-
-
-Events
-------------
-
-Name: slideshow_desktop_init_start
-Description: Fired before the desktop slideshow begins to initialize
-Payload: none
-
-Name: slideshow_desktop_init_done
-Description: Fired when the desktop slideshow is done initializing
-Payload: none
-
-Name: slideshow_desktop_destroy
-Description: Fired when the desktop slideshow is destroyed
-Payload: none
-
-Name: slideshow_set_slide
-Description: Fired when the user selects a specific slide
-Payload: { number } Index of the slide being displayed
-
-Name: slideshow_previous_slide
-Description: Fired when the user selects the previous slide
-Payload: { number } Index of the slide being displayed
-
-Name: slideshow_next_slide
-Description: Fired when the user selects the next slide
-Payload: { number } Index of the slide being displayed
-
-Name: slideshow_video_load
-Description: Fired when a video is being loaded in the slideshow
-Payload: { object } Video player DOM object
-
-Name: slideshow_video_loaded
-Description: Fired when the video is done loading in the slideshow
-Payload: { object } Video player DOM object
-
-*/
-
-var selectors$27 = {
-  buttons: '.slideshow__buttons',
-  button: '.slideshow__button',
-  pauseButton: '[data-pause-button]',
-  label: '.slideshow__button-label',
-  cta: '.slideshow__button-cta--desktop',
-  ctaText: '.slideshow__heading-cta-text',
-  slide: '.slideshow__slide',
-  slideshow: '.slideshow',
-  video: '.slideshow__video'
-};
-
-var classes$24 = {
-  centredCta: 'slideshow--center-cta',
-  buttonActive: 'slideshow__button--active',
-  headingCtaActive: 'slideshow__heading-cta-text--active',
-  headingCtaTransitioning: 'slideshow__heading-cta-text--transitioning',
-  linkActive: 'slideshow__button--link',
-  slideActive: 'slideshow__slide--active',
-  slideActiveTransitioning: 'slideshow__slide--transitioning',
-  videoLoaded: 'slideshow__video--loaded',
-  videoPaused: 'slideshow__video--paused',
-  paused: 'is-paused'
-};
-
-var config = {
-  // Intensity for desktop mouse over effect (if more than 3 slides)
-  easeIntensity: 10
-};
-
-var slideshowDesktop = {
-  initDesktopSlideshow: function() {
-    this.trigger('slideshow_desktop_init_start');
-
-    this.$slideshow = $(selectors$27.slideshow, this.$container);
-    this.$slide = $(selectors$27.slide, this.$container);
-    this.$buttons = $(selectors$27.buttons, this.$container);
-    this.$button = $(selectors$27.button, this.$container);
-
-    this.desktopSlideshow = true;
-    this.isAnimating = false;
-    this.currentDesktopSlide = 0;
-    this.totalSlides = this.$buttons.data('count');
-    this.players = [];
-    this.desktopSlideshowNamespace = '.desktopSlideshow';
-    this.isPostInitialized = false;
-
-    this.on(
-      'mouseover' + this.desktopSlideshowNamespace,
-      this._onHoverSlideshow.bind(this)
-    );
-    this.on(
-      'mousemove' + this.desktopSlideshowNamespace,
-      this._mouseMoveButtons.bind(this)
-    );
-    this.on(
-      'mouseleave' + this.desktopSlideshowNamespace,
-      this._resetButtonsPosition.bind(this)
-    );
-    this.on(
-      'keydown' + this.desktopSlideshowNamespace,
-      this._onTabButtons.bind(this)
-    );
-    this.on(
-      'click' + this.desktopSlideshowNamespace,
-      selectors$27.pauseButton,
-      this._onPauseButton.bind(this)
-    );
-    this.on(
-      'click' + this.desktopSlideshowNamespace,
-      selectors$27.label,
-      this._onClickButton.bind(this)
-    );
-    this.on(
-      'keydown' + this.desktopSlideshowNamespace,
-      this._addKeyBindingsDesktop.bind(this)
-    );
-
-    this.window().on(
-      'resize' + this.desktopSlideshowNamespace,
-      this._setButtonWrapperValues.bind(this)
-    );
-
-    utils.promiseStylesheet().then(
-      function() {
-        this._setButtonWrapperValues();
-        this._setSlideDesktop(0);
-        if (this.$container.hasClass(classes$24.centredCta)) {
-          this._setButtonStatus(0);
-        }
-        this.trigger('slideshow_desktop_init_done');
-      }.bind(this)
-    );
-  },
-
-  destroyDesktopSlideshow: function() {
-    this.trigger('slideshow_desktop_destroy');
-
-    this.desktopSlideshow = false;
-    this.off(this.desktopSlideshowNamespace);
-    this.window().off(this.desktopSlideshowNamespace);
-
-    this._setButtonsTranslateX(0);
-
-    // Loop over every video slide that is found as part of this.players
-    // and explicitly call the YouTube and/or Vimeo destroy method
-    // depending on the type of video player.
-    for (var key in this.players) {
-      if (!this.players.hasOwnProperty(key)) return;
-
-      var player = this.players[key];
-
-      if (typeof player.destroy === 'function') {
-        player.destroy();
-      } else if (typeof player.unload === 'function') {
-        player.unload();
-      }
-    }
-
-    this.players = [];
-  },
-
-  _onHoverSlideshow: function() {
-    this._animateButtonFrame();
-  },
-
-  _mouseMoveButtons: function(evt) {
-    if (this.totalSlides <= 3) return;
-
-    this.mousePosition = evt.pageX - this.centerOfButtonsWrapper;
-
-    if (!this.isAnimating) {
-      this.isAnimating = true;
-      this._animateButtonFrame();
-    }
-  },
-
-  _resetButtonsPosition: function() {
-    this.mousePosition = 0;
-  },
-
-  _onTabButtons: function(evt) {
-    if (evt.which !== utils.keyboardKeys.TAB) return;
-
-    var $nextButton;
-
-    if (!evt.shiftKey) {
-      $nextButton = $(evt.target)
-        .closest(this.$button)
-        .next();
-    } else {
-      $nextButton = $(evt.target)
-        .closest(this.$button)
-        .prev();
-    }
-
-    if (!$nextButton.length) return;
-
-    var division = $(window).width() / this.totalSlides;
-    var buttonIndex = $nextButton.index();
-
-    this.mousePosition = division * buttonIndex - $nextButton.width();
-    this._animateButtonFrame();
-  },
-
-  _onPauseButton: function(evt) {
-    var $currentSlide = this.$slide.eq(this.currentDesktopSlide);
-    var $pauseButton = $(evt.target);
-    var isPaused = $pauseButton.hasClass(classes$24.paused);
-    var blockId = this.$video.attr('data-block-id');
-
-    $pauseButton.toggleClass(classes$24.paused, !isPaused).attr({
-      'aria-label': isPaused
-        ? $pauseButton.data('label-pause')
-        : $pauseButton.data('label-play'),
-      'aria-pressed': !isPaused
-    });
-
-    if (this.players[blockId]) {
-      if (isPaused) {
-        this.players[blockId].playVideo();
-      } else {
-        this.players[blockId].pauseVideo();
-      }
-    }
-    $currentSlide.toggleClass(classes$24.videoPaused);
-  },
-
-  _onClickButton: function(evt) {
-    var $buttonClicked = $(evt.target).closest(selectors$27.button);
-
-    if ($buttonClicked.hasClass(classes$24.buttonActive)) return;
-
-    var index = $buttonClicked.index();
-
-    this._setSlideDesktop(index);
-
-    // Allow first slide to be clicked after initial load
-    if (!$buttonClicked.hasClass(classes$24.buttonActive)) {
-      this._setButtonStatus(index);
-    }
-  },
-
-  _setButtonStatus: function(index) {
-    var $button = this.$button.eq(index);
-    var $buttonText = $button.find(selectors$27.ctaText);
-
-    this.$button
-      .removeClass(classes$24.buttonActive)
-      .find(selectors$27.label)
-      .attr('aria-expanded', false);
-
-    $button
-      .addClass(classes$24.buttonActive)
-      .find(selectors$27.label)
-      .attr('aria-expanded', true);
-
-    if (this.isPostInitialized) {
-      $button.focus();
-    } else {
-      this.isPostInitialized = true;
-    }
-
-    this.$buttons
-      .find(selectors$27.ctaText)
-      .empty()
-      .attr('aria-hidden', true)
-      .removeClass(classes$24.headingCtaActive)
-      .removeAttr('style');
-
-    if ($buttonText.parent().is('a')) {
-      this._showButtonContent($buttonText);
-    }
-
-    this.$button.find(selectors$27.cta).attr('tabindex', '-1');
-    if ($button.hasClass(classes$24.linkActive)) {
-      $button.find(selectors$27.cta).attr('tabindex', '0');
-    }
-  },
-
-  _animateButtonFrame: function() {
-    var deltaPosition = this.mousePosition - this.xPosition;
-    // Calculates the differential ratio between the width of the button wrapper
-    // and the overflowed button element that actually animates.
-    var widthDifferenceRatio =
-      this.buttonsInnerWidth / this.buttonsWrapperWidth - 1;
-
-    // deltaPosition represents the momentum and will increment down every frame
-    // until it reaches < 1, the buttons will then stop animating.
-    if (Math.abs(deltaPosition) < 1) {
-      this.isAnimating = false;
-      return;
-    }
-
-    // This represents the mouse position relative to the slideshow width
-    // where this.xPosition equals 0 if the mouse position is in the center.
-    this.xPosition += deltaPosition / config.easeIntensity;
-
-    this._setButtonsTranslateX(-(this.xPosition * widthDifferenceRatio));
-
-    // This function is called recursively until the condition above is met,
-    // meaning once the buttons have stopped animating.
-    requestAnimationFrame(this._animateButtonFrame.bind(this));
-  },
-
-  _showButtonContent: function($buttonText) {
-    var buttonText = $buttonText.data('button-text');
-
-    $buttonText.html(buttonText).attr('aria-hidden', false);
-
-    if (
-      !$buttonText.attr('data-new-width') ||
-      !$buttonText.attr('data-new-height')
-    ) {
-      $buttonText.attr('data-new-width', $buttonText.outerWidth());
-      $buttonText.attr('data-new-height', $buttonText.outerHeight());
-    }
-
-    var newButtonContentWidth = $buttonText.attr('data-new-width');
-    var newButtonContentHeight = $buttonText.attr('data-new-height');
-
-    $buttonText.empty();
-
-    requestAnimationFrame(function() {
-      $buttonText
-        .css({
-          minHeight: newButtonContentHeight + 'px',
-          minWidth: newButtonContentWidth + 'px'
-        })
-        .addClass(classes$24.headingCtaTransitioning);
-    });
-
-    utils.promiseTransitionEnd($buttonText).then(function() {
-      $buttonText
-        .html(buttonText)
-        .removeClass(classes$24.headingCtaTransitioning)
-        .addClass(classes$24.headingCtaActive);
-    });
-  },
-
-  _setButtonsTranslateX: function(xPosition) {
-    this.$buttons.css({
-      transform: 'translate3d(' + xPosition + 'px, 0, 0)'
-    });
-  },
-
-  _addKeyBindingsDesktop: function(evt) {
-    if (evt.which === utils.keyboardKeys.LEFTARROW) {
-      this._previousSlideDesktop();
-    } else if (evt.which === utils.keyboardKeys.RIGHTARROW) {
-      this._nextSlideDesktop();
-    }
-  },
-
-  _previousSlideDesktop: function() {
-    if (this.currentDesktopSlide === 0) return;
-
-    this._setSlideDesktop(this.currentDesktopSlide - 1);
-  },
-
-  _nextSlideDesktop: function() {
-    if (this.currentDesktopSlide === this.totalSlides - 1) return;
-
-    this._setSlideDesktop(this.currentDesktopSlide + 1);
-  },
-
-  _setSlideDesktop: function(slideIndex) {
-    var $currentSlide = this.$slide.eq(this.currentDesktopSlide);
-    var $nextSlide = this.$slide.eq(slideIndex);
-    var $video = $nextSlide.find(selectors$27.video);
-
-    // We call _loadVideo() before we check to see if
-    // this.currentDesktopSlide === slideIndex (below). This would never fire
-    // on initial load if it was after the condition below since 0 === 0
-    // would return true.
-    if ($video.length) {
-      this._loadVideo($video, $nextSlide);
-    }
-
-    if (this.currentDesktopSlide === slideIndex) return;
-
-    $nextSlide.addClass(classes$24.slideActive).attr('aria-hidden', false);
-    $currentSlide.addClass(classes$24.slideActiveTransitioning);
-
-    utils.promiseTransitionEnd($nextSlide).then(function() {
-      $currentSlide
-        .removeClass(classes$24.slideActive)
-        .removeClass(classes$24.slideActiveTransitioning)
-        .attr('aria-hidden', true);
-    });
-
-    this._setButtonStatus(slideIndex);
-
-    this.currentDesktopSlide = slideIndex;
-
-    this.trigger('slideshow_set_slide', [slideIndex]);
-
-    if (this.currentDesktopSlide - 1 >= 0) {
-      this.trigger('slideshow_previous_slide', [slideIndex - 1]);
-    }
-
-    if (this.currentDesktopSlide + 1 < this.totalSlides) {
-      this.trigger('slideshow_next_slide', [slideIndex + 1]);
-    }
-  },
-
-  _loadVideo: function($video, $slide) {
-    this.$video = $video;
-
-    this.trigger('slideshow_video_load', [$video[0]]);
-
-    return this._promiseVideo().then(
-      function() {
-        $slide.addClass(classes$24.videoLoaded);
-        $slide.find(selectors$27.pauseButton).prop('disabled', false);
-        this.trigger('slideshow_video_loaded', [$video[0]]);
-      }.bind(this)
-    );
-  },
-
-  _promiseVideo: function() {
-    var playerType = this.$video.attr('data-video-type');
-    var promiseVideoPlayer;
-
-    if (playerType === 'youtube') {
-      promiseVideoPlayer = this._loadYoutubePlayer();
-      this.$video.attr('tabindex', '-1');
-    } else if (playerType === 'vimeo') {
-      promiseVideoPlayer = this._loadVimeoPlayer();
-      this.$video.find('iframe').attr('tabindex', '-1');
-    }
-
-    return promiseVideoPlayer;
-  },
-
-  _loadYoutubePlayer: function() {
-    var blockId = this.$video.attr('data-block-id');
-    var videoId = this.$video.attr('data-video-id');
-
-    return youtube
-      .promisePlayer(this.$video[0], {
-        videoId: videoId,
-        ratio: 16 / 9,
-        playerVars: {
-          // eslint-disable-next-line camelcase
-          iv_load_policy: 3,
-          modestbranding: 1,
-          autoplay: 0,
-          controls: 0,
-          showinfo: 0,
-          wmode: 'opaque',
-          branding: 0,
-          autohide: 0,
-          rel: 0
+  _fireEvent() {
+    document.dispatchEvent(
+      new window.CustomEvent('elementSticky', {
+        detail: {
+          stickyElement: this.stickyElement,
+          isSticky: this.sticky,
+          container: this.container,
         },
-        events: {
-          onStateChange: function(evt) {
-            // Video has ended, loop back to beginning
-            if (evt.data === 0) {
-              this.players[blockId].seekTo(0);
-            }
-          }.bind(this)
-        }
       })
-      .then(
-        function(player) {
-          this.players[blockId] = player;
-          player.playVideo().mute();
-          // The video will not play if the iframe is set to visibility: hidden
-          // Need to set it seperately from other styles in order to resolve the promise
-          $(player.a).css('visibility', 'visible');
-          // set player to visible
-          return $.Deferred(function(defer) {
-            player.addEventListener('onStateChange', function(evt) {
-              // Only resolve the promise if the video is playing
-              if (evt.data === 1) {
-                defer.resolve();
-              }
-            });
-          });
-        }.bind(this)
-      );
-  },
-
-  _loadVimeoPlayer: function() {
-    var blockId = this.$video.attr('data-block-id');
-    var videoId = this.$video.attr('data-video-id');
-
-    return vimeo
-      .promisePlayer(this.$video[0], {
-        id: videoId,
-        loop: true,
-        // This property isn't reliable. The user might see the Vimeo playbar flash
-        // as the video begins to play.
-        playbar: false,
-        background: true
-      })
-      .then(
-        function(player) {
-          this.players[blockId] = player;
-          player.play();
-          player.setVolume(0);
-
-          return $.Deferred(function(defer) {
-            player.on('loaded', function() {
-              defer.resolve();
-            });
-          });
-        }.bind(this)
-      );
-  },
-
-  _setButtonWrapperValues: function() {
-    this.mousePosition = 0;
-    this.xPosition = 0;
-    this.buttonsWrapperWidth = this.$container.outerWidth();
-    this.buttonsInnerWidth = this.$button.first().width() * this.totalSlides;
-    this.centerOfButtonsWrapper = this.buttonsWrapperWidth / 2;
-    this.$button
-      .find(selectors$27.ctaText)
-      .removeAttr(
-        'style data-previous-width data-previous-height data-new-width data-new-height'
-      );
-
-    this._setButtonsTranslateX(0);
+    );
   }
-};
 
-/*
-
-Slideshow Mobile Extension
---------------------------------------------------------------------------------
-Manages all the mobile behaviour of the home page slideshow
-
-
-Events
-------------
-
-Name: slideshow_mobile_init_start
-Description: Fired before the mobile slideshow begins to initialize
-Payload: none
-
-Name: slideshow_mobile_init_done
-Description: Fired when the mobile slideshow is done initializing
-Payload: none
-
-Name: slideshow_mobile_destroy
-Description: Fired when the mobile slideshow is destroyed
-Payload: none
-
-Name: slideshow_set_slide
-Description: Fired when the user selects a specific slide
-Payload: { number } Index of the slide being displayed
-
-Name: slideshow_previous_slide
-Description: Fired when the user selects the previous slide
-Payload: { number } Index of the slide being displayed
-
-Name: slideshow_next_slide
-Description: Fired when the user selects the next slide
-Payload: { number } Index of the slide being displayed
-
-*/
-
-var selectors$28 = {
-  button: '.slideshow__button',
-  buttons: '.slideshow__buttons',
-  ctaMultipleSlides: '.slideshow__button-cta--multiple',
-  ctaSingleSlide: '.slideshow__button-cta-single',
-  label: '.slideshow__button-label',
-  mobileTextContainer: '.slideshow__text-container-mobile',
-  mobileTextContent: '.slideshow__text-content-mobile',
-  navigationButtons: '[data-slider-navigation]',
-  nextButton: '[data-slider-navigation-next]',
-  previousButton: '[data-slider-navigation-previous]',
-  slide: '.slideshow__slide',
-  slideshow: '.slideshow',
-  indicatorDots: '.slideshow__indicator'
-};
-
-var classes$25 = {
-  buttonActive: 'slideshow__button--active',
-  dotActive: 'slideshow__indicator--active',
-  linkActive: 'slideshow__button--link',
-  slideActive: 'slideshow__slide--active',
-  slideActiveTransitioning: 'slideshow__slide--transitioning',
-  navigationNoFocus: 'slideshow__navigation-item--no-focus'
-};
-
-var slideshowMobile = {
-  initMobileSlideshow: function() {
-    this.trigger('slideshow_mobile_init_start');
-
-    this.$slideshow = $(selectors$28.slideshow, this.$container);
-    this.$buttons = $(selectors$28.buttons, this.$container);
-    this.$button = $(selectors$28.button, this.$container);
-    this.$navigationButtons = $(selectors$28.navigationButtons, this.$container);
-    this.$ctaMultipleSlides = $(selectors$28.ctaMultipleSlides, this.$container);
-    this.$ctaSingleSlide = $(selectors$28.ctaSingleSlide, this.$container);
-    this.$indicatorDots = $(selectors$28.indicatorDots, this.$container);
-    this.$mobileTextContainer = $(
-      selectors$28.mobileTextContainer,
-      this.$container
+  _addSentinels() {
+    const sentinelTop = document.createElement('div');
+    sentinelTop.classList.add(
+      classes$14.stickySentinel,
+      classes$14.stickySentinelTop
     );
-    this.$mobileTextContent = $(selectors$28.mobileTextContent, this.$container);
+    sentinelTop.dataset.stickySentinelTop = '';
 
-    this.mobileSlideshow = true;
-    this.currentMobileSlide = 0;
-    this.totalSlides = this.$buttons.data('count');
-    this.xPosition = 0;
-    this.mobileSlideshowNamespace = '.mobileSlideshow';
+    this.container.classList.add(classes$14.stickyContainer);
 
-    // The header is above the slideshow in the iOS editor, so we need to
-    // reduce it's height by the height of the header.
-    if ($('html').hasClass('is-ios') && Shopify.designMode) {
-      this.$slideshow.css('height', '-=60px');
-    }
+    this.stickyElement.insertAdjacentElement('beforebegin', sentinelTop);
 
-    this.on(
-      'click keyup' + this.mobileSlideshowNamespace,
-      selectors$28.indicatorDots,
-      this._onClickIndicatorDot.bind(this)
+    const sentinelBottom = document.createElement('div');
+    sentinelBottom.classList.add(
+      classes$14.stickySentinel,
+      classes$14.stickySentinelBottom
     );
-    this.on(
-      'click keyup' + this.mobileSlideshowNamespace,
-      selectors$28.previousButton,
-      this._previousSlideMobile.bind(this)
+    sentinelBottom.dataset.stickySentinelBottom = '';
+
+    this.stickyElement.parentElement.appendChild(sentinelBottom);
+  }
+
+  _observeTopSentinel() {
+    const topSentinel = this.container.querySelector(
+      selectors$17.stickySentinelTop
     );
-    this.on(
-      'click keyup' + this.mobileSlideshowNamespace,
-      selectors$28.nextButton,
-      this._nextSlideMobile.bind(this)
-    );
-    this.on(
-      'keydown' + this.mobileSlideshowNamespace,
-      this._addKeyBindingsMobile.bind(this)
-    );
+    if (!topSentinel) return;
 
-    if (this.totalSlides > 1) {
-      this.hammertime = new Hammer(this.$container[0]);
+    this.topObserver = new IntersectionObserver((records) => {
+      records.forEach((record) => {
+        const targetInfo = record.boundingClientRect;
+        const rootBoundsInfo = record.rootBounds;
 
-      // Import swipe gestures and only allow these two events
-      this.hammertime
-        .on('swipeleft', this._nextSlideMobile.bind(this))
-        .on('swiperight', this._previousSlideMobile.bind(this));
-    }
+        const startedSticking = targetInfo.bottom < rootBoundsInfo.top;
+        const stoppedSticking =
+          targetInfo.bottom >= rootBoundsInfo.top &&
+          targetInfo.bottom < rootBoundsInfo.bottom;
 
-    this.$button.first().addClass(classes$25.buttonActive);
+        if (startedSticking) {
+          this.sticky = true;
+          this.stickyElement.classList.add(classes$14.stickyElement);
+          this._fireEvent();
+        }
 
-    utils.promiseStylesheet().then(
-      function() {
-        this._setSlideMobile(0);
-        this._setMobileText(0);
-        this._setSlideshowA11y();
-        this.trigger('slideshow_mobile_init_done');
-      }.bind(this)
-    );
-  },
-
-  destroyMobileSlideshow: function() {
-    this.trigger('slideshow_mobile_destroy');
-
-    this.mobileSlideshow = false;
-    this.$container.off(this.mobileSlideshowNamespace);
-
-    if (this.totalSlides > 1) {
-      this.hammertime.destroy();
-    }
-  },
-
-  _onClickIndicatorDot: function(evt) {
-    var $indicatorDot = $(evt.target);
-    var index = $indicatorDot.data('slide-index');
-
-    evt.preventDefault();
-
-    if (
-      evt.type === 'keyup' &&
-      !(
-        evt.keyCode === utils.keyboardKeys.ENTER ||
-        evt.keyCode === utils.keyboardKeys.SPACE
-      )
-    )
-      return;
-
-    this._setSlideMobile(index);
-
-    if (evt.type === 'keyup' || evt.detail === 0) {
-      this.$slideshow.focus();
-    }
-  },
-
-  _addKeyBindingsMobile: function(evt) {
-    if (evt.which === utils.keyboardKeys.LEFTARROW) {
-      this._previousSlideMobile(evt);
-    } else if (evt.which === utils.keyboardKeys.RIGHTARROW) {
-      this._nextSlideMobile(evt);
-    }
-  },
-
-  _previousSlideMobile: function(evt) {
-    if (evt.type === 'click') {
-      $(evt.target).addClass(classes$25.navigationNoFocus);
-    }
-    if (
-      (evt.type === 'keyup' &&
-        !(
-          evt.keyCode === utils.keyboardKeys.ENTER ||
-          evt.keyCode === utils.keyboardKeys.SPACE
-        )) ||
-      this.currentMobileSlide === 0
-    ) {
-      return;
-    }
-
-    this._setSlideMobile(this.currentMobileSlide - 1);
-  },
-
-  _nextSlideMobile: function(evt) {
-    if (evt.type === 'click') {
-      $(evt.target).addClass(classes$25.navigationNoFocus);
-    }
-    if (
-      (evt.type === 'keyup' &&
-        !(
-          evt.keyCode === utils.keyboardKeys.ENTER ||
-          evt.keyCode === utils.keyboardKeys.SPACE
-        )) ||
-      this.currentMobileSlide === this.totalSlides - 1
-    ) {
-      return;
-    }
-
-    this._setSlideMobile(this.currentMobileSlide + 1);
-  },
-
-  _setSlideMobile: function(slideIndex) {
-    if (this.currentMobileSlide === slideIndex) return;
-
-    this.xPosition = slideIndex * 50;
-
-    this.$buttons.css({
-      transform: 'translate3d(-' + this.xPosition + '%, 0, 0)'
+        if (stoppedSticking) {
+          this.sticky = false;
+          this.stickyElement.classList.remove(classes$14.stickyElement);
+          this._fireEvent();
+        }
+      });
     });
 
-    this._setActiveStates(slideIndex);
-    this._setSlideA11y(slideIndex);
-    this._setMobileText(slideIndex);
+    this.topObserver.observe(topSentinel);
+  }
 
-    this.currentMobileSlide = slideIndex;
+  _observeBottomSentinel() {
+    const bottomSentinel = this.container.querySelector(
+      selectors$17.stickySentinelBottom
+    );
+    if (!bottomSentinel) return;
 
-    this.trigger('slideshow_set_slide', [slideIndex]);
+    let previousY = 0;
+    this.bottomObserver = new IntersectionObserver((records) => {
+      records.forEach((record) => {
+        const targetInfo = record.boundingClientRect;
+        const rootBoundsInfo = record.rootBounds;
+        const ratio = record.intersectionRatio;
+        const scrollingDown = previousY > record.boundingClientRect.y;
+        previousY = record.boundingClientRect.y;
 
-    this.$navigationButtons.attr('disabled', false);
+        const startedSticking =
+          targetInfo.bottom > rootBoundsInfo.top && ratio === 1;
+        const stoppedSticking =
+          targetInfo.top < rootBoundsInfo.top &&
+          targetInfo.bottom < rootBoundsInfo.bottom;
 
-    if (this.currentMobileSlide === 0) {
-      this.$navigationButtons
-        .filter(selectors$28.previousButton)
-        .attr('disabled', true);
-    }
+        if (!scrollingDown && startedSticking) {
+          this.sticky = true;
+          this.stickyElement.classList.add(classes$14.stickyElement);
+          this._fireEvent();
+        }
 
-    if (this.currentMobileSlide === this.totalSlides - 1) {
-      this.$navigationButtons
-        .not(selectors$28.previousButton)
-        .attr('disabled', true);
-    }
-
-    if (this.currentMobileSlide - 1 >= 0) {
-      this.trigger('slideshow_previous_slide', [slideIndex - 1]);
-    }
-
-    if (this.currentMobileSlide + 1 < this.totalSlides) {
-      this.trigger('slideshow_next_slide', [slideIndex + 1]);
-    }
-  },
-
-  _setActiveStates: function(slideIndex) {
-    this.$slide = this.$slide || $(selectors$28.slide, this.$container); // eslint-disable-line shopify/jquery-dollar-sign-reference
-    this.$button = this.$button || $(selectors$28.button, this.$container); // eslint-disable-line shopify/jquery-dollar-sign-reference
-    this.$dot = this.$dot || $(selectors$28.indicatorDots, this.$container); // eslint-disable-line shopify/jquery-dollar-sign-reference
-
-    var $currentSlide = this.$slide.eq(this.currentMobileSlide);
-    var $nextSlide = this.$slide.eq(slideIndex);
-
-    $nextSlide.addClass(classes$25.slideActive).attr('aria-hidden', false);
-    $currentSlide.addClass(classes$25.slideActiveTransitioning);
-
-    utils.promiseTransitionEnd($nextSlide).then(function() {
-      $currentSlide
-        .removeClass(classes$25.slideActive)
-        .removeClass(classes$25.slideActiveTransitioning)
-        .attr('aria-hidden', true);
+        if (stoppedSticking) {
+          this.sticky = false;
+          this.stickyElement.classList.remove(classes$14.stickyElement);
+          this._fireEvent();
+        }
+      });
     });
 
-    this.$button.removeClass(classes$25.buttonActive);
+    this.bottomObserver.observe(bottomSentinel);
+  }
+}
 
-    this.$button.eq(slideIndex).addClass(classes$25.buttonActive);
+const selectors$18 = {
+  viewMoreButton: '[data-view-more-button]',
+  viewMoreItem: '[data-view-more-item]',
+  viewMoreStatus: '[data-view-more-status]',
+};
 
-    this.$dot.removeClass(classes$25.dotActive);
-    this.$dot.eq(slideIndex).addClass(classes$25.dotActive);
+const classes$15 = {
+  hidden: 'hidden',
+};
+
+const events = {
+  success: 'viewmore_loaded',
+};
+
+class ViewMore {
+  constructor(container) {
+    this.container = container;
+  }
+
+  init() {
+    if (!this.container) return;
+
+    this.viewMoreButton = this.container.querySelector(
+      selectors$18.viewMoreButton
+    );
+    if (!this.viewMoreButton) return;
+
+    this.maxCount = parseInt(this.viewMoreButton.dataset.viewMoreMax, 10);
+    this.countPerPage = parseInt(this.viewMoreButton.dataset.viewMoreStep, 10);
+    this.currentCount = parseInt(
+      this.viewMoreButton.dataset.viewMoreCurrent,
+      10
+    );
+    this.isLoading = false;
+    this._setupEventHandlers();
+  }
+
+  _getEventHandlers() {
+    return {
+      onClickViewMoreHandler: this._onClickViewMoreHandler.bind(this),
+    };
+  }
+
+  _setupEventHandlers() {
+    this.eventHandlers = this._getEventHandlers();
+
+    this.viewMoreButton.addEventListener(
+      'click',
+      this.eventHandlers.onClickViewMoreHandler
+    );
+  }
+
+  _onClickViewMoreHandler() {
+    this._loadItems();
+  }
+
+  _getNextPage() {
+    const nextPage = Math.floor(this.currentCount / this.countPerPage) + 1;
+    const url = this.viewMoreButton.dataset.viewMoreNext.replace(
+      '[pagination]',
+      nextPage
+    );
+
+    return url;
+  }
+
+  _fireEvent(eventName, data) {
+    this.container.dispatchEvent(
+      new window.CustomEvent(eventName, {
+        detail: data,
+      })
+    );
+  }
+
+  _loadItems() {
+    if (this.isLoading || this.currentCount >= this.maxCount) return;
+
+    const url = this._getNextPage();
+    this.isLoading = true;
+    fetch(url)
+      .then((response) => response.text())
+      .then((text) => {
+        const parser = new DOMParser();
+        return parser.parseFromString(text, 'text/html');
+      })
+      .then((html) => {
+        const items = [...html.querySelectorAll(selectors$18.viewMoreItem)];
+
+        if (this.currentCount < this.countPerPage) {
+          items.splice(0, this.currentCount);
+        }
+
+        this.isLoading = false;
+        this.currentCount += items.length;
+        this._updateButton();
+        this._updateLiveRegion();
+        this._fireEvent(events.success, { items });
+      })
+      .then(() => {
+        this._updateSPRBadges();
+      })
+      .catch((error) => {
+        this.isLoading = false;
+        throw new Error(error);
+      });
+  }
+
+  _updateSPRBadges() {
+    if (!window.SPR) return;
+
+    if (window.SPR.initDomEls && window.SPR.loadBadges) {
+      window.SPR.initDomEls();
+      window.SPR.loadBadges();
+    }
+  }
+
+  _updateButton() {
+    this.viewMoreButton.dataset.viewMoreCurrent = this.currentCount;
+
+    if (this.currentCount >= this.maxCount) {
+      this.viewMoreButton.classList.add(classes$15.hidden);
+    }
+  }
+
+  _updateLiveRegion() {
+    const viewMoreStatus = this.container.querySelector(
+      selectors$18.viewMoreStatus
+    );
+    const viewMoreStatusMessage = viewMoreStatus.dataset.viewMoreStatusMessage
+      .replace('[item_count]', this.currentCount)
+      .replace('[item_max]', this.maxCount);
+
+    viewMoreStatus.innerText = viewMoreStatusMessage;
+    viewMoreStatus.setAttribute('aria-hidden', false);
+
+    // hide content from accessibility tree after announcement
+    setTimeout(() => {
+      viewMoreStatus.setAttribute('aria-hidden', true);
+    }, 1000);
+  }
+}
+
+const selectors$16 = {
+  scrollerContent: '[data-scroller-content]',
+  featuredCollectionsTabs: '[data-featured-collections-tab]',
+  featuredCollectionsSelectedTab: '[data-featured-collections-selected-tab]',
+  featuredCollectionsTabsPanel: '[data-featured-collections-tab-panel]',
+  featuredCollectionsWrapper: '[data-featured-collections-wrapper]',
+  productCard: '[data-product-card]',
+  productCardLink: '[data-product-card-link]',
+  productModalContent: '[data-product-modal-content]',
+  viewMoreContent: '[data-view-more-content]',
+};
+
+const classes$13 = {
+  featuredCollectionsPanelActive: 'featured-collections__panel--active',
+  featuredCollectionsPanelVisible: 'featured-collections__panel--visible',
+  featuredCollectionsTabActive: 'featured-collections-tab__item--active',
+};
+
+sections.register('featured-collections', {
+  onLoad() {
+    this.elements = this._getElements();
+
+    this.scroller = new Scroller(this.container);
+    this.scroller.init();
+
+    this.stickyNav = new StickyElement(this.container);
+    this.stickyNav.init();
+
+    this.isProductModalEnabled = Boolean(this.container.dataset.productModal);
+    this.isQuickAddEnabled = Boolean(this.container.dataset.quickAdd);
+    this.hasSingleCollection = Boolean(this.container.dataset.singleCollection);
+
+    if (this.isProductModalEnabled) {
+      this.elements.productModalContent = document.querySelector(
+        selectors$16.productModalContent
+      );
+    }
+
+    this._setupProductCards();
+    this._setupEventHandlers();
+
+    if (!theme.cartQuantity) return;
+
+    theme.cartQuantity.updateQuantityIndicatorElements(false, this.container);
   },
 
-  _setSlideshowA11y: function() {
-    this.$labels = this.$labels || this.$button.find(selectors$28.label); // eslint-disable-line shopify/jquery-dollar-sign-reference
-    this.$ctaSingleSlide =
-      this.$ctaSingleSlide || this.$button.find(selectors$28.ctaSingleSlide); // eslint-disable-line shopify/jquery-dollar-sign-reference
+  onUnload() {
+    if (!this.elements.tabs) return;
 
-    this.$ctaSingleSlide.attr('tabindex', '0');
-    this.$labels.attr('tabindex', '-1');
-    this._setSlideA11y(0);
+    this.stickyNav.destroy();
+    this.scroller.destroy();
+    this.elements.tabs.forEach((tab) => {
+      tab.removeEventListener('click', this.eventHandlers.onClickTabHandler);
+      tab.removeEventListener(
+        'keydown',
+        this.eventHandlers.onKeyDownTabHandler
+      );
+    });
+  },
 
-    $.each(
-      this.$indicatorDots,
-      function(index, indicatorDot) {
-        $(indicatorDot).attr({
-          'aria-controls': 'Slide' + index
-        });
-      }.bind(this)
+  onBlockSelect(event) {
+    if (this.hasSingleCollection) return;
+
+    const selectedBlock = this.container.querySelector(
+      `[data-featured-collections-block-id="${event}"]`
+    );
+
+    if (!selectedBlock) return;
+    const selectedTab = selectedBlock.dataset.featuredCollectionsTabNumber;
+    this.showCollectionPanel(selectedTab);
+  },
+
+  _getElements() {
+    return {
+      tabs: this.container.querySelectorAll(selectors$16.featuredCollectionsTabs),
+      tabsPanel: this.container.querySelectorAll(
+        selectors$16.featuredCollectionsTabsPanel
+      ),
+      tabsPanelWrapper: this.container.querySelector(
+        selectors$16.featuredCollectionsWrapper
+      ),
+    };
+  },
+
+  _getEventHandlers() {
+    return {
+      onClickTabHandler: this.onClickTabHandler.bind(this),
+      onKeyDownTabHandler: this.onKeyDownTabHandler.bind(this),
+      onKeyUpTabHandler: this.onKeyUpTabHandler.bind(this),
+      onViewMoreLoaded: this.onViewMoreLoaded.bind(this),
+    };
+  },
+
+  _setupEventHandlers() {
+    this.eventHandlers = this._getEventHandlers();
+
+    this.elements.tabsPanel.forEach((tabPanel) => {
+      if (!tabPanel.dataset.viewMore) return;
+
+      const viewMore = new ViewMore(tabPanel);
+      viewMore.init();
+      tabPanel.addEventListener(
+        'viewmore_loaded',
+        this.eventHandlers.onViewMoreLoaded
+      );
+    });
+
+    if (!this.elements.tabs || this.hasSingleCollection) return;
+
+    this.elements.tabs.forEach((tab) => {
+      tab.addEventListener('click', this.eventHandlers.onClickTabHandler);
+      tab.addEventListener('keydown', this.eventHandlers.onKeyDownTabHandler);
+      tab.addEventListener('keyup', this.eventHandlers.onKeyUpTabHandler);
+    });
+  },
+
+  _setupProductCards() {
+    if (!this.isProductModalEnabled && !this.isQuickAddEnabled) return;
+
+    this.elements.tabsPanel.forEach((tabPanel) => {
+      const productCards = tabPanel.querySelectorAll(selectors$16.productCard);
+      const collectionTitle = tabPanel.dataset.collectionTitle;
+
+      productCards.forEach((cardElement) => {
+        const productCard = new ProductCard(
+          cardElement,
+          this.elements.productModalContent,
+          collectionTitle
+        );
+
+        productCard.init();
+      });
+    });
+  },
+
+  onViewMoreLoaded(event) {
+    const newProducts = event.detail.items;
+    const viewMoreContainer = event.target;
+    const collectionTitle = viewMoreContainer.dataset.collectionTitle;
+
+    const viewMoreContent = viewMoreContainer.querySelector(
+      selectors$16.viewMoreContent
+    );
+
+    const newProductIds = [];
+    newProducts.forEach((product, index) => {
+      const newElement = product.querySelector(selectors$16.productCard);
+      newProductIds.push(newElement.dataset.productId);
+
+      const newItem = viewMoreContent.appendChild(product);
+      const productLink = newItem.querySelector(selectors$16.productCardLink);
+      if (productLink && index === 0) productLink.focus();
+
+      if (!this.isProductModalEnabled && !this.isQuickAddEnabled) return;
+
+      const newProductCard = new ProductCard(
+        newElement,
+        this.elements.productModalContent,
+        collectionTitle
+      );
+      newProductCard.init();
+    });
+
+    theme.cartQuantity.updateQuantityIndicatorElements(
+      newProductIds,
+      this.viewMoreContent,
+      true
     );
   },
 
-  _setSlideA11y: function(slideIndex) {
-    var $button = this.$button.eq(slideIndex);
+  /**
+   * Keyboard event callback
+   * Make the tab list keyboard navigation friendly with Home, End, Left arrow, Right arrow keys
+   * @param {Object} event Event object
+   */
+  onKeyDownTabHandler(event) {
+    const preventKeys = [
+      keyCodes.HOME,
+      keyCodes.END,
+      keyCodes.RIGHT,
+      keyCodes.LEFT,
+    ];
 
-    this.$ctasMultipleSlides =
-      this.$ctasMultipleSlides ||
-      this.$button.find(selectors$28.ctaMultipleSlides); // eslint-disable-line shopify/jquery-dollar-sign-reference
+    if (preventKeys.includes(event.key.toLowerCase())) {
+      event.preventDefault();
+    }
+  },
 
-    if (this.$ctasMultipleSlides) {
-      this.$ctasMultipleSlides.attr('tabindex', '-1');
+  /**
+   * Keyboard event callback
+   * Make the tab list keyboard navigation friendly with Home, End, Left arrow, Right arrow keys
+   * @param {Object} event Event object
+   */
+  onKeyUpTabHandler(event) {
+    const currentElement = event.currentTarget;
+    const lastElementIndex = this.elements.tabs.length - 1;
+    const currentElementIndex = Number(
+      currentElement.dataset.featuredCollectionsTabNumber
+    );
 
-      // All slide titles are tabbable. If the currently active button has a CTA
-      // link, the CTA link becomes tabbable as well.
-      if ($button.hasClass(classes$25.linkActive)) {
-        this.$ctasMultipleSlides.eq(slideIndex).attr('tabindex', '0');
+    let index = -1;
+    switch (event.key.toLowerCase()) {
+      case keyCodes.HOME: {
+        index = 0;
+        break;
+      }
+      case keyCodes.END: {
+        index = lastElementIndex;
+        break;
+      }
+      case keyCodes.RIGHT: {
+        index =
+          currentElementIndex === lastElementIndex
+            ? 0
+            : currentElementIndex + 1;
+        break;
+      }
+      case keyCodes.LEFT: {
+        index =
+          currentElementIndex === 0
+            ? lastElementIndex
+            : currentElementIndex - 1;
+        break;
       }
     }
 
-    $.each(
-      this.$indicatorDots,
-      function(index, indicatorDot) {
-        $(indicatorDot).attr({
-          'aria-label': this._slideLabel(slideIndex, index),
-          'aria-current': slideIndex === index ? true : false
-        });
-      }.bind(this)
-    );
-  },
-
-  _setMobileText: function(slideIndex) {
-    var $currentTextContent = this.$mobileTextContent.eq(slideIndex);
-    this.$ctaSingleSlide =
-      this.$ctaSingleSlide || this.$button.find(selectors$28.ctaSingleSlide); // eslint-disable-line shopify/jquery-dollar-sign-reference
-
-    if (this.$ctaSingleSlide.length) {
-      // Adjust for buttons with labels on multiple lines.
-      var paddingAdjustment =
-        (this.$ctaSingleSlide.outerHeight() - 50) / 2 + 40;
-      this.$mobileTextContent.css('padding-top', paddingAdjustment + 'px');
-    }
-
-    this.$mobileTextContent.hide();
-    $currentTextContent.show();
-  },
-
-  _slideLabel: function(activeSlideIndex, currentIndex) {
-    var label =
-      activeSlideIndex === currentIndex
-        ? theme.strings.slideshow.activeSlideA11yString
-        : theme.strings.slideshow.loadSlideA11yString;
-
-    return label.replace('[slide_number]', currentIndex + 1);
-  }
-};
-
-/*
-
-Slideshow Section
---------------------------------------------------------------------------------
-Manages the functionality of the both mobile and desktop slideshow
-
-*/
-
-// Extensions
-// Libs
-var selectors$26 = {
-  button: '.slideshow__button',
-  slide: '.slideshow__slide'
-};
-
-var classes$23 = {
-  buttonActive: 'slideshow__button--active',
-  slideActive: 'slideshow__slide--active'
-};
-
-sections.register('slideshow-section', {
-  onLoad: function() {
-    this.extend(slideshowDesktop);
-    this.extend(slideshowMobile);
-
-    this.$container.on('focusin' + this.namespace, this._onFocusIn.bind(this));
-    this.$container.on(
-      'focusout' + this.namespace,
-      this._onFocusOut.bind(this)
-    );
-    this._toggleViewState();
-
-    this.window().on('resize', this._toggleViewState.bind(this));
-  },
-
-  onUnload: function() {
-    this._destroyDesktopState();
-    this._destroyMobileState();
-  },
-
-  onBlockSelect: function(evt) {
-    utils.promiseStylesheet().then(
-      function() {
-        var index = $(evt.target).index();
-
-        if (this.mobileViewEnabled) {
-          this._setSlideMobile(index);
-        } else {
-          this._setSlideDesktop(index);
-        }
-      }.bind(this)
-    );
-  },
-
-  _toggleViewState: function() {
-    var windowWidth = $(window).innerWidth();
-    var enableMobileView;
-    var enableDesktopView;
-
-    if (typeof this.mobileViewEnabled === 'undefined') {
-      enableMobileView = windowWidth < theme.mediaQuerySmall;
-      enableDesktopView = windowWidth >= theme.mediaQuerySmall;
-    } else {
-      enableMobileView =
-        windowWidth < theme.mediaQuerySmall && !this.mobileViewEnabled;
-      enableDesktopView =
-        windowWidth >= theme.mediaQuerySmall && this.mobileViewEnabled;
-    }
-
-    if (enableMobileView) {
-      this.mobileViewEnabled = true;
-      this._destroyDesktopState();
-      this._enableMobileState();
-    }
-
-    if (enableDesktopView) {
-      this.mobileViewEnabled = false;
-      this._destroyMobileState();
-      this._enableDesktopState();
+    if (index !== -1 && currentElementIndex !== index) {
+      event.preventDefault();
+      this.showCollectionPanel(index);
     }
   },
 
-  _enableDesktopState: function() {
-    this.initDesktopSlideshow();
+  onClickTabHandler(event) {
+    const index = event.currentTarget.dataset.featuredCollectionsTabNumber;
+    this.showCollectionPanel(index);
   },
 
-  _destroyDesktopState: function() {
-    if (!this.desktopSlideshow) return;
+  /**
+   * Show the correct tabpanel, adjust the aria attributes and classes accordingly
+   * @param {Number} index The position of the tabpanel
+   */
+  showCollectionPanel(index) {
+    const targetTab = this.elements.tabs[index];
 
-    this.destroyDesktopSlideshow();
-    this._resetSlideshowValues();
-  },
+    const offsetPosition =
+      this.elements.tabsPanelWrapper.getBoundingClientRect().top +
+      window.pageYOffset -
+      105;
 
-  _enableMobileState: function() {
-    this.initMobileSlideshow();
-  },
+    if (this.stickyNav.isSticky()) {
+      document.dispatchEvent(new CustomEvent('featuredCollectionTabClicked'));
 
-  _destroyMobileState: function() {
-    if (!this.mobileSlideshow) return;
-
-    this.destroyMobileSlideshow();
-    this._resetSlideshowValues();
-  },
-
-  // This method is called when the viewport goes from mobile to desktop
-  // and vice versa. It ensures the slideshow resets to the first slide,
-  // which helps with potential conflicting values based on shared markup.
-  _resetSlideshowValues: function() {
-    $(selectors$26.slide)
-      .removeClass(classes$23.slideActive)
-      .first()
-      .addClass(classes$23.slideActive);
-
-    $(selectors$26.button)
-      .removeClass(classes$23.buttonActive)
-      .first()
-      .addClass(classes$23.buttonActive);
-  },
-
-  _onFocusIn: function(evt) {
-    if (
-      this.$container.has(evt.target).length &&
-      this.$slideshow.attr('aria-live') === 'polite'
-    ) {
-      return;
-    }
-
-    this.$slideshow.attr('aria-live', 'polite');
-  },
-
-  _onFocusOut: function(evt) {
-    if (this.$container.has(evt.relatedTarget).length) {
-      return;
-    }
-
-    this.$slideshow.removeAttr('aria-live');
-  }
-});
-
-var selectors$29 = {
-  loadPlayerButton: '.video-section__load-player-button',
-  closePlayerButton: '.video-section__player-close',
-  playerContainer: '.video-section__player',
-  cover: '.video-section__cover',
-  errorMessage: '.video-section__error',
-  bodyOverlay: '.video-section__body-overlay'
-};
-
-var classes$26 = {
-  playerLoading: 'video-section--loading',
-  playerLoaded: 'video-section--loaded',
-  playerError: 'video-section--error',
-  animateButton: 'animated pulse'
-};
-
-sections.register('video-section', {
-  onLoad: function() {
-    this.$container = $(this.container);
-
-    this.$container
-      .on('click', selectors$29.loadPlayerButton, this._loadPlayer.bind(this))
-      .on('click', selectors$29.closePlayerButton, this._closePlayer.bind(this))
-      .on('click', selectors$29.bodyOverlay, this._closePlayer.bind(this));
-  },
-
-  _loadPlayer: function() {
-    var $container = this.$container;
-    var $loadButton = $(selectors$29.loadPlayerButton, $container);
-    var $playerContainer = $(selectors$29.playerContainer, $container);
-    var playerType = this.$container.attr('data-video-type');
-    var promiseVideoPlayer;
-
-    $loadButton.addClass(classes$26.animateButton);
-
-    this._scrollToPlayer($container);
-
-    if (playerType === 'youtube') {
-      promiseVideoPlayer = this._loadYoutubePlayer($playerContainer[0]);
-    } else if (playerType === 'vimeo') {
-      promiseVideoPlayer = this._loadVimeoPlayer($playerContainer[0]);
-    }
-
-    return promiseVideoPlayer
-      .then(this._onPlayerLoadReady.bind(this))
-      .catch(this._onPlayerLoadError.bind(this))
-      .always(function() {
-        $loadButton.removeClass(classes$26.animateButton);
+      window.scrollTo({
+        top: offsetPosition,
       });
-  },
-
-  _scrollToPlayer: function(container) {
-    var containerTop = container.offset().top;
-    var offset = ($(window).height() - container.height()) / 2;
-
-    $('html, body').animate(
-      {
-        scrollTop: containerTop - Math.max(offset, 0)
-      },
-      400
-    );
-  },
-
-  _loadYoutubePlayer: function(container) {
-    return youtube
-      .promisePlayer(container, {
-        videoId: this.$container.attr('data-video-id'),
-        ratio: 16 / 9,
-        playerVars: {
-          modestbranding: 1,
-          autoplay: 1,
-          showinfo: 0,
-          rel: 0
-        }
-      })
-      .then(
-        function(player) {
-          this.player = player;
-        }.bind(this)
-      );
-  },
-
-  _loadVimeoPlayer: function(container) {
-    return vimeo
-      .promisePlayer(container, {
-        id: this.$container.attr('data-video-id')
-      })
-      .then(
-        function(player) {
-          this.player = player;
-          this.player.play();
-        }.bind(this)
-      );
-  },
-
-  _onPlayerLoadReady: function() {
-    $(selectors$29.closePlayerButton, this.$container)
-      .show()
-      .focus();
-    $(selectors$29.cover, this.$container)
-      .prepareTransition()
-      .addClass(classes$26.playerLoaded);
-    this.$container.addClass(classes$26.playerLoaded);
-
-    this._setScrollPositionValues();
-
-    $(document)
-      .one('keyup' + this.namespace, this._closeOnEscape.bind(this))
-      .on('scroll' + this.namespace, this._onScroll.bind(this));
-
-    $(window).on(
-      'resize' + this.namespace,
-      this._setScrollPositionValues.bind(this)
-    );
-  },
-
-  _onPlayerLoadError: function(err) {
-    this.$container.addClass(classes$26.playerError);
-    $(selectors$29.errorMessage, this.$container).text(err);
-  },
-
-  _closeOnEscape: function(evt) {
-    if (evt.keyCode !== 27) return;
-
-    this._closePlayer();
-    $(selectors$29.loadPlayerButton, this.$container).focus();
-  },
-
-  _onScroll: function() {
-    var scrollTop = $(window).scrollTop();
-
-    if (
-      scrollTop > this.videoTop + 0.25 * this.videoHeight ||
-      scrollTop + this.windowHeight < this.videoBottom - 0.25 * this.videoHeight
-    ) {
-      // Debounce DOM edits to the next frame with requestAnimationFrame
-      requestAnimationFrame(this._closePlayer.bind(this));
-    }
-  },
-
-  _setScrollPositionValues: function() {
-    this.videoHeight = this.$container.outerHeight(true);
-    this.videoTop = this.$container.offset().top;
-    this.videoBottom = this.videoTop + this.videoHeight;
-    this.windowHeight = $(window).innerHeight();
-  },
-
-  _closePlayer: function() {
-    $(selectors$29.cover, this.$container)
-      .prepareTransition()
-      .removeClass(classes$26.playerLoaded);
-    this.$container.removeClass(classes$26.playerLoaded);
-    $(selectors$29.closePlayerButton, this.$container).hide();
-
-    if (typeof this.player.destroy === 'function') {
-      this.player.destroy();
-    } else if (typeof this.player.unload === 'function') {
-      this.player.unload();
     }
 
-    $(document).off(this.namespace);
-    $(window).off(this.namespace);
-  }
+    this.elements.tabs.forEach((tab) => {
+      tab.classList.remove(classes$13.featuredCollectionsTabActive);
+      tab.setAttribute('aria-selected', false);
+      tab.setAttribute('tabindex', -1);
+      delete tab.dataset.featuredCollectionsSelectedTab;
+      tab.blur();
+    });
+
+    targetTab.classList.add(classes$13.featuredCollectionsTabActive);
+    targetTab.setAttribute('aria-selected', true);
+    targetTab.setAttribute('tabindex', 0);
+    targetTab.dataset.featuredCollectionsSelectedTab = true;
+    targetTab.focus();
+
+    this.scroller.makeElementVisible(targetTab);
+
+    const targetPanel = this.elements.tabsPanel[index];
+    if (!targetPanel) return;
+
+    this.elements.tabsPanel.forEach((tabPanel) => {
+      tabPanel.classList.remove(classes$13.featuredCollectionsPanelVisible);
+      tabPanel.classList.remove(classes$13.featuredCollectionsPanelActive);
+    });
+
+    targetPanel.classList.add(classes$13.featuredCollectionsPanelActive);
+    window.requestAnimationFrame(() =>
+      targetPanel.classList.add(classes$13.featuredCollectionsPanelVisible)
+    );
+  },
 });
 
-// import templates.js and assign it to the global theme object
-window.theme.templates = templates;
+const selectors$19 = {
+  productCard: '[data-product-card]',
+  productModalContent: '[data-product-modal-content]',
+  dataSlide: '[data-slide]',
+};
 
-// import all templates js
-// import sections.js and assign it to the global theme object
-window.theme.sections = sections;
+sections.register('custom-content', {
+  onLoad() {
+    this.elements = this._getElements();
 
-// import all sections js
-$(document).ready(function() {
-  templates.load('*');
+    const products = this.container.querySelectorAll(selectors$19.productCard);
+
+    if (this.container.dataset.slider) {
+      this._prepareGallery();
+    }
+
+    this.isProductModalEnabled = Boolean(this.container.dataset.productModal);
+
+    if (this.isProductModalEnabled && products.length > 0) {
+      this._setupProductCards();
+    }
+  },
+
+  onUnload() {
+    const hasGallery = Boolean(this.gallery);
+
+    if (!hasGallery) return;
+
+    this.gallery.destroy();
+  },
+
+  _getElements() {
+    return {
+      productModalContent: document.querySelector(
+        selectors$19.productModalContent
+      ),
+    };
+  },
+
+  _setupProductCards() {
+    const products = this.container.querySelectorAll(selectors$19.productCard);
+
+    products.forEach((singleProduct) => {
+      const productCardModal = new ProductCard(
+        singleProduct,
+        this.elements.productModalContent
+      );
+
+      productCardModal.init();
+    });
+  },
+
+  _prepareGallery() {
+    this.galleryElement = this.container.querySelector(selectors$19.dataSlide);
+
+    if (!this.galleryElement) return;
+
+    this._addGalleryMediaQueryListener();
+
+    if (this.galleryMediaQueryListener.matches) {
+      this._initializeGallery();
+      this.gallery.addAccessibilityAttr();
+    }
+  },
+
+  _disableGalleryMode() {
+    this.gallery.removeAccessibilityAttr();
+    this.gallery.resetTransformation();
+    this.gallery.state.useAriaHidden = false;
+    this.gallery.destroy();
+  },
+
+  _switchToGalleryMode() {
+    const galleryWasJustInitialized = this._initializeGallery();
+    this.gallery.state.useAriaHidden = true;
+    this.gallery.hideMedia();
+    this.gallery.addAccessibilityAttr();
+
+    if (galleryWasJustInitialized) return;
+
+    this.gallery.bindEvents();
+  },
+
+  _addGalleryMediaQueryListener() {
+    this.galleryMediaQueryListener = window.matchMedia(
+      getMediaQueryString('medium', 'max')
+    );
+
+    this.galleryMediaQueryListener.addListener((event) => {
+      if (event.matches) {
+        this._switchToGalleryMode();
+        return;
+      }
+
+      this._disableGalleryMode();
+    });
+  },
+
+  _initializeGallery() {
+    if (this.gallery) {
+      this.gallery.applyTransformation();
+      window.setTimeout(() => this.gallery.enableTransition());
+      return false;
+    }
+
+    this.gallery = new Gallery(this.galleryElement);
+    this.gallery.init();
+
+    return true;
+  },
+});
+
+const selectors$20 = {
+  blogTagFilter: '[data-blog-tag-filter]',
+};
+
+(() => {
+  const blogTagFilter = document.querySelector(selectors$20.blogTagFilter);
+
+  if (!blogTagFilter) return;
+
+  resizeSelectInput(blogTagFilter);
+
+  blogTagFilter.addEventListener('change', (event) => {
+    location.href = event.target.value;
+  });
+})();
+
+const selectors$21 = {
+  passwordButton: '[data-password-button]',
+  passwordInput: '[data-password-input]',
+};
+
+const attributes$2 = {
+  error: 'data-error',
+  templatePassword: 'data-template-password',
+};
+
+(() => {
+  const isPasswordTemplate = document.body.hasAttribute(
+    attributes$2.templatePassword
+  );
+
+  if (!isPasswordTemplate) return;
+
+  const passwordInput = document.querySelector(selectors$21.passwordInput);
+
+  if (passwordInput.hasAttribute(attributes$2.error)) {
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        showPasswordModal();
+      }, 50);
+    });
+  }
+
+  function showPasswordModal() {
+    const passwordModal = window.popups.find(
+      (popup) => popup.name === 'password-modal'
+    );
+
+    passwordModal.openPopup({
+      currentTarget: document.querySelector(selectors$21.passwordButton),
+    });
+  }
+})();
+
+const selectors$22 = {
+  addNewAddressToggle: '[data-add-new-address-toggle]',
+  addressCountrySelect: '[data-address-country-select]',
+  addressFormNew: '[data-address-form-new]',
+  cancelEditAddressToggle: '[data-cancel-edit-address-toggle]',
+  cancelNewAddressToggle: '[data-cancel-new-address-toggle]',
+  customerAddresses: '[data-customer-addresses]',
+  deleteAddressButton: '[data-delete-address-button]',
+  editAddressToggle: '[data-edit-address-toggle]',
+  editAddressId: (id) => `[data-edit-address-id="${id}"]`,
+  form: '[data-form]',
+};
+
+const attributes$3 = {
+  addNewAddressToggle: 'data-add-new-address-toggle',
+};
+
+const classes$16 = {
+  hidden: 'hidden',
+};
+
+(() => {
+  const container = document.querySelector(selectors$22.customerAddresses);
+
+  if (!container) return;
+
+  const newAddressForm = container.querySelector(selectors$22.addressFormNew);
+
+  if (!newAddressForm) return;
+
+  _setupCountries();
+
+  _setupEventListeners();
+
+  function _setupEventListeners() {
+    const addNewAddressToggle = container.querySelector(
+      selectors$22.addNewAddressToggle
+    );
+
+    const cancelNewAddressToggle = container.querySelector(
+      selectors$22.cancelNewAddressToggle
+    );
+
+    const editAddressToggles = container.querySelectorAll(
+      selectors$22.editAddressToggle
+    );
+    const cancelEditAddressToggles = container.querySelectorAll(
+      selectors$22.cancelEditAddressToggle
+    );
+
+    const deleteAddressButtons = container.querySelectorAll(
+      selectors$22.deleteAddressButton
+    );
+
+    addNewAddressToggle.addEventListener('click', (event) =>
+      _toggleAddNewAddressForm(event, addNewAddressToggle, newAddressForm)
+    );
+
+    cancelNewAddressToggle.addEventListener('click', (event) =>
+      _toggleAddNewAddressForm(event, addNewAddressToggle, newAddressForm)
+    );
+
+    editAddressToggles.forEach((editAddressToggle) =>
+      editAddressToggle.addEventListener('click', (event) =>
+        _toggleEditAddressForm(event, editAddressToggles)
+      )
+    );
+
+    cancelEditAddressToggles.forEach((cancelEditAddressToggle) =>
+      cancelEditAddressToggle.addEventListener('click', () => {
+        _toggleEditAddressForm(event, editAddressToggles);
+      })
+    );
+
+    deleteAddressButtons.forEach((deleteButton) =>
+      deleteButton.addEventListener('click', _deleteAddress)
+    );
+  }
+
+  function _setupCountries() {
+    // Initialize observers on address selectors, defined in shopify_common.js
+    if (Shopify) {
+      // eslint-disable-next-line no-new
+      new Shopify.CountryProvinceSelector(
+        'AddressCountryNew',
+        'AddressProvinceNew',
+        {
+          hideElement: 'AddressProvinceContainerNew',
+        }
+      );
+    }
+
+    // Initialize each edit form's country/province selector
+    container
+      .querySelectorAll(selectors$22.addressCountrySelect)
+      .forEach((countrySelect) => {
+        const formId = countrySelect.dataset.formId;
+        const countrySelector = `AddressCountry_${formId}`;
+        const provinceSelector = `AddressProvince_${formId}`;
+        const containerSelector = `AddressProvinceContainer_${formId}`;
+
+        // eslint-disable-next-line no-new
+        new Shopify.CountryProvinceSelector(countrySelector, provinceSelector, {
+          hideElement: containerSelector,
+        });
+      });
+  }
+
+  function _toggleAddNewAddressForm(
+    event,
+    addNewAddressToggle,
+    // eslint-disable-next-line no-shadow
+    newAddressForm
+  ) {
+    const button = event.currentTarget;
+    const newAddressFormExpandedState = addNewAddressToggle.getAttribute(
+      'aria-expanded'
+    );
+
+    if (newAddressFormExpandedState === 'false') {
+      newAddressForm.classList.remove(classes$16.hidden);
+      addNewAddressToggle.setAttribute('aria-expanded', true);
+    } else {
+      newAddressForm.classList.add(classes$16.hidden);
+      addNewAddressToggle.setAttribute('aria-expanded', false);
+    }
+
+    if (button.hasAttribute(attributes$3.addNewAddressToggle)) return;
+    addNewAddressToggle.focus();
+  }
+
+  function _toggleEditAddressForm(event, editAddressToggles) {
+    const button = event.currentTarget;
+    const addressId = button.dataset.addressId;
+    const editAddressformContainer = container.querySelector(
+      selectors$22.editAddressId(addressId)
+    );
+    const editButton = Array.from(editAddressToggles).find(
+      (editAddressToggle) => editAddressToggle.dataset.addressId === addressId
+    );
+
+    if (editButton.getAttribute('aria-expanded') === 'false') {
+      editAddressformContainer.classList.remove(classes$16.hidden);
+      editButton.setAttribute('aria-expanded', true);
+    } else {
+      editAddressformContainer.classList.add(classes$16.hidden);
+      editButton.setAttribute('aria-expanded', false);
+    }
+
+    if (button.hasAttribute(attributes$3.editAddressFormToggle)) return;
+    editButton.focus();
+  }
+
+  function _deleteAddress(event) {
+    const deleteButton = event.currentTarget;
+    const target = deleteButton.dataset.target;
+    const confirmMessage =
+      deleteButton.dataset.confirmMessage ||
+      'Are you sure you wish to delete this address?';
+
+    // eslint-disable-next-line no-alert
+    if (confirm(confirmMessage)) {
+      Shopify.postLink(target, {
+        parameters: { _method: 'delete' },
+      });
+    }
+  }
+})();
+
+const selectors$23 = {
+  cancelResetPasswordLink: '[data-cancel-reset-password-link]',
+  customerLogin: '[data-customer-login]',
+  loginContainer: '[data-login-container]',
+  loginHeading: '[data-login-heading]',
+  resetPasswordHeading: '[data-reset-password-heading]',
+  resetPasswordLink: '[data-reset-password-link]',
+  resetPasswordContainer: '[data-reset-password-container]',
+  resetPasswordSuccess: '[data-reset-password-success]',
+  resetPasswordSuccessMessage: '[data-reset-password-success-message]',
+};
+
+const classes$17 = {
+  hidden: 'hidden',
+};
+
+(() => {
+  const container = document.querySelector(selectors$23.customerLogin);
+
+  if (!container) return;
+
+  _checkUrlHash();
+  _resetPasswordOnSuccess();
+  _setupEventHandlers();
+
+  function _setupEventHandlers() {
+    const resetPasswordLink = container.querySelector(
+      selectors$23.resetPasswordLink
+    );
+
+    const cancelResetPasswordLink = container.querySelector(
+      selectors$23.cancelResetPasswordLink
+    );
+
+    resetPasswordLink.addEventListener('click', (event) => {
+      event.preventDefault();
+
+      const resetPasswordHeading = container.querySelector(
+        selectors$23.resetPasswordHeading
+      );
+      _handleContainers(resetPasswordHeading, true);
+    });
+
+    cancelResetPasswordLink.addEventListener('click', (event) => {
+      event.preventDefault();
+
+      const loginHeading = container.querySelector(selectors$23.loginHeading);
+      _handleContainers(loginHeading, false);
+    });
+  }
+
+  function _checkUrlHash() {
+    const hash = window.location.hash;
+
+    // Allow deep linking to recover password form
+    if (hash === '#recover') {
+      const resetPasswordHeading = container.querySelector(
+        selectors$23.resetPasswordHeading
+      );
+
+      _handleContainers(resetPasswordHeading, true);
+    }
+  }
+
+  function _resetPasswordOnSuccess() {
+    const resetPasswordStatus = container.querySelector(
+      selectors$23.resetPasswordSuccess
+    );
+    const resetPasswordMessage = container.querySelector(
+      selectors$23.resetPasswordSuccessMessage
+    );
+
+    if (!resetPasswordStatus) return;
+
+    resetPasswordMessage.classList.remove(classes$17.hidden);
+    resetPasswordMessage.focus();
+  }
+
+  function _handleContainers(containerHeading, showPasswordPage) {
+    const loginContainer = container.querySelector(selectors$23.loginContainer);
+    const resetPasswordContainer = container.querySelector(
+      selectors$23.resetPasswordContainer
+    );
+
+    if (showPasswordPage) {
+      loginContainer.classList.add(classes$17.hidden);
+      resetPasswordContainer.classList.remove(classes$17.hidden);
+    } else {
+      loginContainer.classList.remove(classes$17.hidden);
+      resetPasswordContainer.classList.add(classes$17.hidden);
+    }
+
+    containerHeading.setAttribute('tabindex', '-1');
+    containerHeading.focus();
+
+    containerHeading.addEventListener('blur', () => {
+      containerHeading.removeAttribute('tabindex');
+    });
+  }
+})();
+
+// import components
+// import sections
+// import templates
+window.addEventListener('DOMContentLoaded', () => {
+  // eslint-disable-next-line no-new
+  new Form();
+
   sections.load('*');
 
-  a11y.accessibleLinks('a[href]:not([aria-describedby]', {
+  window.carts = Array.from(
+    document.querySelectorAll('[data-cart]'),
+    (cart) => {
+      const currentCart = new Cart(cart);
+      currentCart.init();
+      return currentCart;
+    }
+  );
+
+  window.popups = Array.from(
+    document.querySelectorAll('[data-popup]'),
+    (popup) => {
+      const currentPopup = new Popup(popup.dataset.popup);
+      currentPopup.init();
+      return currentPopup;
+    }
+  );
+
+  _shopify_themeA11y.accessibleLinks('a[href]:not([aria-describedby]', {
     messages: {
       newWindow: theme.strings.newWindow,
       external: theme.strings.external,
-      newWindowExternal: theme.strings.newWindowExternal
-    }
+      newWindowExternal: theme.strings.newWindowExternal,
+    },
   });
+
+  theme.cartQuantity = new CartQuantity();
+  theme.cartQuantity.updateLocalCartState();
+
+  const cartTemplate = document.querySelector('[data-cart-template]');
+
+  if (cartTemplate) {
+    const cart = new CartTemplate(cartTemplate);
+    cart.init();
+  }
 });
 
-}(jQuery,_.omit,_.find,_.throttle,Shopify.theme.a11y,_.remove,_.filter,_.fill,_.debounce,morphdom,_.defaultTo,_.findIndex,_.isArray,Hammer));
+}(Shopify.theme.sections,Shopify.theme.a11y));

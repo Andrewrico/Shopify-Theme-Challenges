@@ -1,31 +1,32 @@
-{%- if recommendations.performed -%}
-  {%- if section.settings.show_product_recommendations -%}
+{%- if section.settings.show_product_recommendations -%}
+  {%- if recommendations.performed -%}
     {%- if recommendations.products_count > 0 -%}
-      <div class="product-recommendations">
-        <div class="product-recommendations__heading grid text-center">
-          <div class="grid__item medium-up--ten-twelfths medium-up--push-one-twelfth">
-            <h2>{{ section.settings.heading | escape }}</h2>
-          </div>
-        </div>
-        <ul class="product-recommendations__slider" data-recommendations-slider>
+      <div data-product-recommendations>
+        {%- if section.settings.heading != blank -%}
+          <h2 class="product-recommendations__heading h1 center">{{ section.settings.heading | escape }}</h2>
+        {%- endif -%}
+
+        <ul class="featured-collections__products grid grid--2-col-tablet" role="list">
           {%- for product in recommendations.products -%}
-            <li class="product-recommendations__slide" data-recommendations-slide data-product-recommendation-index="{{ forloop.index }}">
-              {% include 'product-card', product: product %}
+            <li class="featured-collections__item">
+              {% render 'product-card-list', product: product, show_form: section.settings.quick_add %}
             </li>
           {%- endfor -%}
         </ul>
-        {%- if recommendations.products_count > 1 -%}
-          <div class="product-recommendations__indicators-wrapper" aria-hidden="true" data-recommendations-indicators>
-            {%- for product in recommendations.products -%}
-              <span class="product-recommendations__slide-indicator" data-recommendations-indicator data-product-recommendation-indicator-index="{{ forloop.index }}"></span>
-            {%- endfor -%}
-          </div>
-        {%- endif -%}
       </div>
     {%- endif -%}
+  {%- else  -%}
+    <div class="product-recommendations"
+        data-section-id="{{ section.id }}"
+        data-section-type="product-recommendations"
+        product-recommendations-container
+        data-base-url="{{ routes.product_recommendations_url }}"
+        data-product-id="{{ product.id }}"
+        {% if settings.show_product_modal %} data-product-modal="true"{% endif %}
+        {% if section.settings.quick_add %} data-quick-add="true"{% endif %}
+    >
+    </div>
   {%- endif -%}
-{%- else -%}
-  <div data-base-url="{{ routes.product_recommendations_url }}" data-product-id="{{ product.id }}" data-section-id="{{ section.id }}" data-section-type="product-recommendations"></div>
 {%- endif -%}
 
 {% schema %}
@@ -39,8 +40,8 @@
     "fi": "Tuotesuositukset",
     "fr": "Recommandations de produits",
     "it": "Raccomandazioni sui prodotti",
-    "ja": "商品の推奨",
-    "ko": "제품 권장 사항",
+    "ja": "商品のおすすめ",
+    "ko": "추천 제품",
     "nb": "Produktanbefalinger",
     "nl": "Productaanbevelingen",
     "pl": "Rekomendacje produktu",
@@ -55,57 +56,6 @@
   },
   "settings": [
     {
-      "type": "checkbox",
-      "id": "show_product_recommendations",
-      "label": {
-        "cs": "Zobrazit dynamická doporučení",
-        "da": "Vis dynamiske anbefalinger",
-        "de": "Dynamische Empfehlungen anzeigen",
-        "en": "Show dynamic recommendations",
-        "es": "Mostrar recomendaciones dinámicas",
-        "fi": "Näytä dynaamiset suositukset",
-        "fr": "Afficher les recommandations dynamiques",
-        "it": "Mostra raccomandazioni dinamiche",
-        "ja": "動的推奨を表示する",
-        "ko": "동적 권장 사항 표시",
-        "nb": "Vis dynamiske anbefalinger",
-        "nl": "Dynamische aanbevelingen weergeven",
-        "pl": "Pokaż dynamiczne rekomendacje",
-        "pt-BR": "Exibir recomendações dinâmicas",
-        "pt-PT": "Mostrar recomendações dinâmicas",
-        "sv": "Visa dynamiska rekommendationer",
-        "th": "แสดงคำแนะนำแบบไดนามิก",
-        "tr": "Dinamik önerileri göster",
-        "vi": "Hiển thị đề xuất động",
-        "zh-CN": "显示动态推荐",
-        "zh-TW": "顯示動態推薦"
-      },
-      "info": {
-        "cs": "Dynamická doporučení se v průběhu času mění a zlepšují. [Další informace](https://help.shopify.com/en/themes/development/recommended-products)",
-        "da": "Dynamiske anbefalinger ændres og forbedres med tiden. [Få mere at vide](https://help.shopify.com/en/themes/development/recommended-products)",
-        "de": "Dynamische Empfehlungen werden im Laufe der Zeit angepasst und verbessert. [Mehr Informationen](https://help.shopify.com/en/themes/development/recommended-products)",
-        "en": "Dynamic recommendations change and improve with time. [Learn more](https://help.shopify.com/en/themes/development/recommended-products)",
-        "es": "Las recomendaciones dinámicas cambian y mejoran con el tiempo. [Más información](https://help.shopify.com/en/themes/development/recommended-products)",
-        "fi": "Dynaamiset suositukset muuttuvat ja paranevat ajan myötä. [Lisätietoja](https://help.shopify.com/en/themes/development/recommended-products)",
-        "fr": "Les recommandations dynamiques changent et s'améliorent avec le temps. [En savoir plus](https://help.shopify.com/en/themes/development/recommended-products)",
-        "it": "Le raccomandazioni dinamiche cambiano e migliorano nel tempo. [Maggiori informazioni](https://help.shopify.com/en/themes/development/recommended-products)",
-        "ja": "動的推奨は時間とともに変化し改善します。[詳細情報](https://help.shopify.com/en/themes/development/recommended-products)",
-        "ko": "동적 권장 사항은 시간이 지나면서 변하고 개선됩니다. [자세히 알아보기](https://help.shopify.com/en/themes/development/recommended-products)",
-        "nb": "Dynamiske anbefalinger endrer seg og forbedres med tiden. [Finn ut mer](https://help.shopify.com/en/themes/development/recommended-products)",
-        "nl": "Dynamische aanbevelingen veranderen en verbeteren mettertijd. [Meer informatie](https://help.shopify.com/en/themes/development/recommended-products)",
-        "pl": "Dynamiczne rekomendacje są zmieniane i ulepszane. [Dowiedz się więcej ](https://help.shopify.com/en/themes/development/recommended-products)",
-        "pt-BR": "As recomendações dinâmicas mudam e melhoram com o tempo. [Saiba mais](https://help.shopify.com/en/themes/development/recommended-products)",
-        "pt-PT": "As recomendações dinâmicas mudam e melhoram com o tempo. [Saiba mais](https://help.shopify.com/en/themes/development/recommended-products)",
-        "sv": "Dynamiska rekommendationer ändras och förbättras med tiden. [Läs mer](https://help.shopify.com/en/themes/development/recommended-products)",
-        "th": "คำแนะนำแบบไดนามิกนั้นเปลี่ยนแปลงและถูกปรับปรุงให้ดีขึ้นตลอดเวลา [ดูข้อมูลเพิ่มเติม](https://help.shopify.com/en/themes/development/recommended-products)",
-        "tr": "Dinamik öneriler zamanla değişir ve gelişir. [Daha fazla bilgi edinin](https://help.shopify.com/en/themes/development/recommended-products)",
-        "vi": "Đề xuất động sẽ được thay đổi và cải thiện theo thời gian. [Tìm hiểu thêm](https://help.shopify.com/en/themes/development/recommended-products)",
-        "zh-CN": "动态推荐会随着时间而变化和改进。[了解详细信息](https://help.shopify.com/en/themes/development/recommended-products)",
-        "zh-TW": "動態推薦會隨著時間改變與改進。[深入瞭解](https://help.shopify.com/en/themes/development/recommended-products)"
-      },
-      "default": false
-    },
-    {
       "type": "text",
       "id": "heading",
       "label": {
@@ -113,10 +63,10 @@
         "da": "Overskrift",
         "de": "Überschrift",
         "en": "Heading",
-        "es": "Título",
-        "fi": "Otsake",
-        "fr": "En-tête",
-        "it": "Heading",
+        "es": "Encabezado",
+        "fi": "Otsikko",
+        "fr": "Titre",
+        "it": "Titolo",
         "ja": "見出し",
         "ko": "제목",
         "nb": "Overskrift",
@@ -138,7 +88,7 @@
         "en": "You may also like",
         "es": "También te puede interesar",
         "fi": "Saatat pitää myös näistä",
-        "fr": "Vous pourriez aimer également",
+        "fr": "Vous aimerez peut-être aussi",
         "it": "Potrebbero interessarti anche",
         "ja": "あなたへのおすすめ",
         "ko": "회원님도 좋아할 것입니다.",
@@ -157,58 +107,82 @@
     },
     {
       "type": "checkbox",
-      "id": "show_spacing",
+      "id": "show_product_recommendations",
       "label": {
-        "cs": "Povolit rozestupy mezi obrázky",
-        "da": "Aktivér billedafstand",
-        "de": "Bildabstand aktivieren",
-        "en": "Enable image spacing",
-        "es": "Habilitar espaciado de imagen",
-        "fi": "Ota kuvien välistys käyttöön",
-        "fr": "Activer l'espacement des images",
-        "it": "Abilita spaziatura immagini",
-        "ja": "画像の間隔を有効にする",
-        "ko": "이미지 공간 추가",
-        "nb": "Aktiver bildeavstand",
-        "nl": "Afstand tussen afbeeldingen inschakelen",
-        "pl": "Włącz odstępy między obrazami",
-        "pt-BR": "Habilitar espaçamento de imagem",
-        "pt-PT": "Ativar espaçamento de imagens",
-        "sv": "Aktivera bildavstånd",
-        "th": "เปิดใช้การวางตำแหน่งรูปภาพ",
-        "tr": "Görüntü aralığını etkinleştir",
-        "vi": "Bật giãn cách hình ảnh",
-        "zh-CN": "启用图片间距",
-        "zh-TW": "啟用圖片間距"
-      }
+        "cs": "Zobrazit dynamická doporučení",
+        "da": "Vis dynamiske anbefalinger",
+        "de": "Dynamische Empfehlungen anzeigen",
+        "en": "Show dynamic recommendations",
+        "es": "Mostrar recomendaciones dinámicas",
+        "fi": "Näytä dynaamiset suositukset",
+        "fr": "Afficher les recommandations dynamiques",
+        "it": "Mostra raccomandazioni dinamiche",
+        "ja": "ダイナミックレコメンデーションを表示する",
+        "ko": "동적 권장 사항 표시",
+        "nb": "Vis dynamiske anbefalinger",
+        "nl": "Dynamische aanbevelingen weergeven",
+        "pl": "Pokaż dynamiczne rekomendacje",
+        "pt-BR": "Exibir recomendações dinâmicas",
+        "pt-PT": "Mostrar recomendações dinâmicas",
+        "sv": "Visa dynamiska rekommendationer",
+        "th": "แสดงคำแนะนำแบบไดนามิก",
+        "tr": "Dinamik önerileri göster",
+        "vi": "Hiển thị đề xuất động",
+        "zh-CN": "显示动态推荐",
+        "zh-TW": "顯示動態推薦"
+      },
+      "info": {
+        "cs": "Dynamická doporučení se v průběhu času mění a zlepšují. [Další informace](https://help.shopify.com/en/themes/development/recommended-products)",
+        "da": "Dynamiske anbefalinger ændres og forbedres med tiden. [Få mere at vide](https://help.shopify.com/en/themes/development/recommended-products)",
+        "de": "Dynamische Empfehlungen werden im Laufe der Zeit angepasst und verbessert. [Mehr Informationen](https://help.shopify.com/en/themes/development/recommended-products)",
+        "en": "Dynamic recommendations change and improve with time. [Learn more](https://help.shopify.com/en/themes/development/recommended-products)",
+        "es": "Las recomendaciones dinámicas cambian y mejoran con el tiempo. [Más información](https://help.shopify.com/en/themes/development/recommended-products)",
+        "fi": "Dynaamiset suositukset muuttuvat ja paranevat ajan myötä. [Lisätietoja](https://help.shopify.com/en/themes/development/recommended-products)",
+        "fr": "Les recommandations dynamiques changent et s'améliorent au fil du temps. [En savoir plus](https://help.shopify.com/en/themes/development/recommended-products)",
+        "it": "Le raccomandazioni dinamiche cambiano e migliorano nel tempo. [Maggiori informazioni ](https://help.shopify.com/en/themes/development/recommended-products)",
+        "ja": "ダイナミックレコメンデーションは、時間とともに変化し、質が向上します。[詳しくはこちら](https://help.shopify.com/en/themes/development/recommended-products)",
+        "ko": "동적 권장 사항은 시간이 지나면서 변하고 개선됩니다. [자세히 알아보기](https://help.shopify.com/en/themes/development/recommended-products)",
+        "nb": "Dynamiske anbefalinger endrer seg og forbedres med tiden. [Finn ut mer](https://help.shopify.com/en/themes/development/recommended-products)",
+        "nl": "Dynamische aanbevelingen veranderen en in de loop van de tijd verbeteren. [Meer informatie](https://help.shopify.com/en/themes/development/recommended-products)",
+        "pl": "Dynamiczne rekomendacje są zmieniane i ulepszane. [Dowiedz się więcej ](https://help.shopify.com/en/themes/development/recommended-products)",
+        "pt-BR": "As recomendações dinâmicas mudam e melhoram com o tempo. [Saiba mais](https://help.shopify.com/en/themes/development/recommended-products)",
+        "pt-PT": "As recomendações dinâmicas mudam e melhoram com o tempo. [Saber mais](https://help.shopify.com/en/themes/development/recommended-products)",
+        "sv": "Dynamiska rekommendationer ändras och förbättras med tiden. [Läs mer](https://help.shopify.com/en/themes/development/recommended-products)",
+        "th": "คำแนะนำแบบไดนามิกเปลี่ยนแปลงและพัฒนาตลอดเวลา [ดูข้อมูลเพิ่มเติม](https://help.shopify.com/en/themes/development/recommended-products)",
+        "tr": "Dinamik öneriler zamanla değişir ve gelişir. [Daha fazla bilgi edinin](https://help.shopify.com/en/themes/development/recommended-products)",
+        "vi": "Đề xuất động sẽ được thay đổi và cải thiện theo thời gian. [Tìm hiểu thêm](https://help.shopify.com/en/themes/development/recommended-products)",
+        "zh-CN": "动态推荐会随着时间而变化和改进。[了解详细信息](https://help.shopify.com/en/themes/development/recommended-products)",
+        "zh-TW": "動態推薦會隨著時間改變與改進。[深入瞭解](https://help.shopify.com/en/themes/development/recommended-products)"
+      },
+      "default": false
     },
     {
       "type": "checkbox",
-      "id": "show_vendor",
+      "id": "quick_add",
       "label": {
-        "cs": "Zobrazit dodavatele produktů",
-        "da": "Vis produktleverandører",
-        "de": "Produktanbieter anzeigen",
-        "en": "Show product vendors",
-        "es": "Mostrar proveedores del producto",
-        "fi": "Näytä tuotteen myyjät",
-        "fr": "Afficher les vendeurs",
-        "it": "Mostra fornitori prodotto",
-        "ja": "商品の販売元を表示する",
-        "ko": "제품 공급 업체 표시",
-        "nb": "Vis produktleverandører",
-        "nl": "Productleveranciers weergeven",
-        "pl": "Pokaż dostawców produktu",
-        "pt-BR": "Exibir fornecedores dos produtos",
-        "pt-PT": "Mostrar fornecedores dos produtos",
-        "sv": "Visa produktleverantörer",
-        "th": "แสดงผู้ขายสินค้า",
-        "tr": "Ürün satıcılarını göster",
-        "vi": "Hiển thị nhà cung cấp sản phẩm",
-        "zh-CN": "显示产品厂商",
-        "zh-TW": "顯示產品廠商"
+        "cs": "Povolit tlačítko Rychlý nákup",
+        "da": "Aktivér knappen \"Hurtigt køb\"",
+        "de": "\"Quick Buy\"-Schaltfläche aktivieren",
+        "en": "Enable ‘Quick buy’ button",
+        "es": "Activar botón ‘Compra rápida’",
+        "fi": "Ota \"Pikaosto\"-painike käyttöön",
+        "fr": "Activer le bouton « Achat rapide »",
+        "it": "Abilita il pulsante \"Acquisto rapido\"",
+        "ja": "「クイック購入」ボタンを有効にする",
+        "ko": "'빠른 구매' 버튼 활성화",
+        "nb": "Aktiver 'Hurtigkjøp'-knapp",
+        "nl": "Knop 'Snel kopen' inschakelen",
+        "pl": "Włącz przycisk 'Szybki zakup'",
+        "pt-BR": "Habilitar botão \"Compra rápida\"",
+        "pt-PT": "Ativar o botão \"Compra rápida\"",
+        "sv": "Aktivera knappen för \"Snabbköp\"",
+        "th": "เปิดใช้ปุ่ม \"ซื้อด่วน\"",
+        "tr": "\"Hızlı satın alma\" düğmesini etkinleştir",
+        "vi": "Bật nút \"Quick buy\" (Mua nhanh)",
+        "zh-CN": "启用“快速购买”按钮",
+        "zh-TW": "啟用「快速購買」按鈕"
       },
-      "default": true
+      "default": false
     }
   ]
 }

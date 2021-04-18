@@ -1,31 +1,53 @@
-<div class="card critical-clear" data-animate>
-  <a href="{{ collection.url }}" class="card__wrapper{% if section.settings.show_spacing %} card__wrapper--padding{% endif %} text-center">
+{% comment %}
+    Renders a collection card
 
-    {% if collection.title == blank %}
-      {% assign collection_image = blank %}
-    {% elsif collection.image %}
-      {% assign collection_image = collection.image %}
-    {% else %}
-      {% assign collection_image = collection.products.first.featured_media.preview_image %}
-    {% endif %}
+    Accepts:
+    - collection: {Object} Collection Liquid object (required)
+    - keep_image_ratio: {Boolean} Keep the image ratio (optional)
 
-    {% unless collection.title == blank %}
-      {% include 'card-image', type: collection_image, grid_style: grid_style %}
-    {% else %}
-      <div class="card__image-wrapper">
-        {% capture current %}{% cycle 1, 2, 3, 4, 5, 6 %}{% endcapture %}
-        {{ 'collection-' | append: current | placeholder_svg_tag: 'placeholder-svg' }}
+    Usage:
+    {% render 'collection-card',
+      collection: collection,
+      keep_image_ratio: block.settings.keep_image_ratio
+    %}
+{% endcomment %}
+
+{%- liquid
+  assign onboarding_title = 'homepage.onboarding.collection_title' | t
+
+  unless collection == empty
+    assign collection_image = collection.image | default: collection.products.first.featured_media.preview_image
+
+   else
+    assign onboarding = true
+    assign onboarding_title = 'homepage.onboarding.collection_title' | t
+
+  endunless
+-%}
+
+<a href="{{ collection.url | default: '#' }}" class="collection-card">
+  {%- unless onboarding -%}
+    {%- if collection_image != blank -%}
+      <div class="collection-card__image-container{% unless keep_image_ratio %} collection-card__image-container--square{% endunless %}">
+        <img srcset="{% if collection_image.width >= 311 %}{{ collection_image | img_url: '311x' }} 311w,{% endif %}
+          {% if collection_image.width >= 622 %}{{ collection_image | img_url: '622x' }} 622w,{% endif %}
+          {% if collection_image.width >= 503 %}{{ collection_image | img_url: '503x' }} 503w,{% endif %}
+          {% if collection_image.width >= 1006 %}{{ collection_image | img_url: '1006x' }} 1006w,{% endif %}
+          {% if collection_image.width >= 685 %}{{ collection_image | img_url: '685x' }} 685w,{% endif %}
+          {% if collection_image.width >= 1370 %}{{ collection_image | img_url: '1370x' }} 1370w{% endif %}"
+          sizes="(min-width: 1200px) 1080px, (min-width: 750px) calc(100vw - 8rem), calc(100vw - 6.4rem)"
+          src="{{ collection_image | img_url: '1080x' }}"
+          width="{{ collection_image.width }}"
+          height="{{ collection_image.height }}"
+          loading="lazy"
+          class="{% if keep_image_ratio %}collection-card__image{% else %}media-cover{% endif %}"
+          alt="">
       </div>
-    {% endunless %}
-
-    <div class="card__info">
-      <h3 class="card__name h4">{% if collection.title != blank %}{{ collection.title }}{% else %}{{ 'homepage.onboarding.collection_title' | t }}{% endif %}</h3>
-
-      {% if section.settings.show_description and collection.description != blank %}
-        <div class="rte card__description{% if width == '2' %} card__description--padding{% endif %}">
-          {{ collection.description | strip_html | truncatewords: 15 }}
-        </div>
-      {% endif %}
+    {%- endif -%}
+  {%- else -%}
+    {{ 'image' | placeholder_svg_tag: 'placeholder-svg' }}
+  {%- endunless -%}
+    <div class="collection-card__title{% unless onboarding or collection_image != blank %} collection-card--no-image{% endunless %} h2">
+      {{ collection.title | default: onboarding_title | escape }}
     </div>
-  </a>
-</div>
+</a>

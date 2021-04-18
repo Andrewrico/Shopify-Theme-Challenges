@@ -1,68 +1,78 @@
-<!-- /templates/gift_card.liquid -->
-{% layout 'giftcard' %}
+{%- layout 'gift_card' -%}
 
-<header class="giftcard-header text-center">
-  <h1 class="giftcard-header__shop-name h5">
-    <a href="{{ shop.url }}" itemprop="url">{{ shop.name }}</a>
-  </h1>
-  <div class="giftcard__shop-url">{{ shop.url | escape }}</div>
-</header>
+{%- liquid
+  assign formatted_initial_value = gift_card.initial_value | money_without_trailing_zeros: gift_card.currency
+  assign formatted_initial_value_stripped = formatted_initial_value | strip_html
+  assign initial_value_size = formatted_initial_value | size -%}
 
-<div class="text-center">
-  <main class="giftcard__wrapper{% if gift_card.expired or gift_card.enabled != true %} giftcard__disabled{% endif %}" role="main">
-    <div class="giftcard__content">
+<div class="gift-card">
+  <header role="banner">
+    <a href="{{ shop.url }}" class="h2 gift-card__heading">{{ shop.name }}</a>
+    <h1 class="h2 gift-card__heading">{{ 'gift_cards.issued.subtext' | t }}</h1>
 
-      <h1 class="giftcard__title h2">{{ 'gift_cards.issued.subtext' | t }}</h1>
-      {% unless gift_card.enabled %}
-      <span class="giftcard__tag">{{ 'gift_cards.issued.disabled' | t }}</span>
-      {% endunless %}
-      {% assign gift_card_expiry_date = gift_card.expires_on | date: format: 'basic' %}
-      {% if gift_card.expired and gift_card.enabled %}
-        <span class="giftcard__tag">{{ 'gift_cards.issued.expired' | t: expiry: gift_card_expiry_date }}</span>
-      {% endif %}
-      {% if gift_card.expired != true and gift_card.expires_on and gift_card.enabled %}
-        <span class="giftcard__tag giftcard__tag--active">{{ 'gift_cards.issued.active' | t: expiry: gift_card_expiry_date }}</span>
-      {% endif %}
+    {% unless gift_card.enabled %}
+      <p>{{ 'gift_cards.issued.disabled' | t }}</p>
+    {% endunless %}
+    {% assign gift_card_expiry_date = gift_card.expires_on | date: format: 'basic' %}
+    {% if gift_card.expired and gift_card.enabled %}
+      <p>{{ 'gift_cards.issued.expired' | t: expiry: gift_card_expiry_date }}</p>
+    {% endif %}
+    {% if gift_card.expired != true and gift_card.expires_on and gift_card.enabled %}
+      <p>{{ 'gift_cards.issued.active' | t: expiry: gift_card_expiry_date }}</p>
+    {% endif %}
+  </header>
 
-      <p class="giftcard__instructions rte">
-        {% capture print_link %}
-        <a href="#" id="PrintGiftCard">{{ 'gift_cards.issued.print' | t }}</a>
-        {% endcapture %}
-        {{ 'gift_cards.issued.redeem_html' | t: print: print_link }}
-      </p>
+  <main role="main">
+    <div class="gift-card-image-wrapper">
+      <img src="{{ 'gift-card/card.jpg' | shopify_asset_url }}" alt="" class="gift-card-image-wrapper__image">
 
-      <div class="giftcard__wrap">
-        <img src="{{ 'gift-card/card.jpg' | shopify_asset_url }}" alt="Gift card illustration">
-
-        {%- assign formatted_initial_value = gift_card.initial_value | money_without_trailing_zeros: gift_card.currency -%}
-        <h2 class="giftcard__amount h3">{{ formatted_initial_value | strip_html }}</h2>
-
+      <div class="gift-card-amount">
         {% if gift_card.balance != gift_card.initial_value %}
-          <p>{{ 'gift_cards.issued.remaining_html' | t: balance: gift_card.balance | money }}</p>
+          <span class="gift-card-amount__tooltip center">
+            <span class="gift-card-amount__tooltip-label">{{ 'gift_cards.issued.remaining_html' | t: balance: gift_card.balance | money }}</span>
+          </span>
         {% endif %}
-
-        {% assign code_size = gift_card.code | format_code | size %}
-        <div class="giftcard__code">
-          <div class="giftcard__code-bubble">
-            <strong class="giftcard__code-text" id="GiftCardDigits">{{ gift_card.code | format_code }}</strong>
-          </div>
-        </div>
+        <strong>{{ formatted_initial_value }}</strong>
       </div>
 
-      <div id="QrCode" class="giftcard__qr-code" data-identifier="{{ gift_card.qr_identifier }}"></div>
-
-      {% if gift_card.pass_url %}
-        <a class="giftcard__apple-wallet" href="{{ gift_card.pass_url }}">
-          <img class="giftcard__apple-wallet-image" src="{{ 'gift-card/add-to-apple-wallet.svg' | shopify_asset_url }}" width="120" height="40" alt="{{ 'gift_cards.issued.add_to_apple_wallet' | t }}">
-        </a>
-      {% endif %}
-
-      <a href="{{ shop.url }}" class="giftcard__start-shopping btn btn--clear" target="_blank">
-        {{ 'gift_cards.issued.shop_link' | t }}
-        {% include 'icon-arrow-right' %}
-      </a>
-
+      <div class="gift-card-code">
+        <div class="gift-card-code__inner">
+          <input type="text"
+            class="gift-card-code__text center{% if gift_card.expired or gift_card.enabled != true %} disabled{% endif %}"
+            value="{{ gift_card.code | format_code }}"
+            aria-label="{{ 'gift_cards.issued.gift_card_code' | t }}"
+            data-gift-card-code
+            readonly />
+        </div>
+      </div>
     </div>
+
+    <p class="gift-card__redeem-text">{{ 'gift_cards.issued.redeem' | t: value: formatted_initial_value_stripped }}</p>
+
+    <div class="gift-card__qr-code" data-qr-code data-identifier="{{ gift_card.qr_identifier }}"></div>
+
+    <ul class="gift-card-action-list">
+      <li>
+        <a href="{{ shop.url }}"
+          class="gift-card-action-list__button button"
+          target="_blank"
+          rel="noopener"
+          aria-describedby="a11y-new-window-message">
+            {{ 'gift_cards.issued.shop_link' | t }}
+        </a>
+      </li>
+      <li>
+        <button class="gift-card-action-list__button button button--secondary" onclick="window.print();">
+          {{ 'gift_cards.issued.print' | t }}
+        </button>
+      </li>
+      {% if gift_card.pass_url %}
+        <li>
+          <a class="gift-card-action-list__button button" href="{{ gift_card.pass_url }}">
+            <img src="{{ 'gift-card/add-to-apple-wallet.svg' | shopify_asset_url }}" width="120" height="40" alt="{{ 'gift_cards.issued.add_to_apple_wallet' | t }}">
+          </a>
+        </li>
+      {% endif %}
+    </ul>
   </main>
 </div>
-
