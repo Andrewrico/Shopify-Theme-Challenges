@@ -1,156 +1,320 @@
+<!-- {%- form 'localization', class: 'footer__disclosure-form', data-disclosure-form: '' -%}
+<div class="selectors-form__item">
+  <h2 class="visually-hidden" id="lang-heading">
+    {{ 'layout.footer.language_label' | t }}
+  </h2>
 
-
-
-<div class="localization-switcher">
-  {%- form 'localization', class: 'locale_dropup', id: 'localizationForm' -%}
-      <button type="button" class="locale_button" aria-expanded="false" aria-controls="localeList"  >
-        {{ form.current_locale.endonym_name }}
-      </button>
-
-      <ul id="localeList" class="locale_content">
-        {%- for locale in form.available_locales -%}
-          <li>
-            <a id="localeLink" href="#" lang="{{ locale.iso_code }}"
-
-                {% if locale.iso_code == form.current_locale.iso_code %} 
-                  aria-current="true" 
-                {% endif %}
-
-            > {{ locale.endonym_name }}
-
-            </a>
-          </li>
-        {%- endfor -%}
-      </ul>
-      <input 
-        type="hidden" 
-        name="locale_code" 
-        id="LocaleSelector" 
-        value="{{ form.current_locale.iso_code }}"
-      />
-  {%- endform -%}
-  <script>
-
-    document.querySelectorAll("#localeLink").forEach(item => {
-      item.addEventListener("click", event => {
-        document.getElementById("LocaleSelector").value = item.getAttribute("lang");
-        document.getElementById("localizationForm").submit();
-      })
-    })
-
-  </script>
+  <div class="disclosure" data-disclosure>
+    <button
+      type="button"
+      class="disclosure__toggle"
+      aria-expanded="false" aria-controls="lang-list" aria-describedby="lang-heading"
+      data-disclosure-toggle
+    >
+      {{ form.current_locale.endonym_name }}
+      <span class="disclosure__toggle-down">
+        {% render 'icon-select' %}
+      </span>
+      <span class="disclosure__toggle-up">
+        {% render 'icon-select' %}
+      </span>
+    </button>
+    <ul id="lang-list" class="disclosure-list" data-disclosure-list role="list">
+      {%- for locale in form.available_locales -%}
+        <li class="disclosure-list__item {% if locale.iso_code == form.current_locale.iso_code %}disclosure-list__item--current{% endif %}">
+          <a class="disclosure-list__option"
+              href="#"
+              lang="{{ locale.iso_code }}"
+              {% if locale.iso_code == form.current_locale.iso_code %} aria-current="true"{% endif %}
+              data-value="{{ locale.iso_code }}"
+              data-disclosure-option
+          >
+            {{ locale.endonym_name }}
+          </a>
+        </li>
+      {%- endfor -%}
+    </ul>
+    <input type="hidden" name="locale_code" id="LocaleSelector" value="{{ form.current_locale.iso_code }}" data-disclosure-input/>
+  </div>
 </div>
+{%- endform -%} -->
 
-<div class="header-wrapper" data-section-id="{{ section.id }}" data-section-type="header">
-  <header class="header{% if section.settings.enable_secondary_background %} header--secondary-background{% endif %}" role="banner" data-header>
-    <div class="header__content-wrapper">
-     
+<!-- #TOPBAR -->
+<div class="topbar">
 
-      {%- liquid
-        if render_menu
-          render 'menu-navigation', menu: menu, is_mobile: false
-        endif
-      -%}
-
-      <div class="header__icons">
-
-        {%- if request.page_type == 'index' -%}
-        <h1 class="header__heading">
-      {%- else -%}
-        <div class="header__heading">
+    <!-- CUSTOMER BUTTON -->
+    {%- if shop.customer_accounts_enabled -%}
+      {% assign customer_url = routes.account_login_url %}
+      {% assign customer_fallback_text = 'layout.customer.log_in' | t %}
+      {%- if customer -%}
+        {% assign customer_url = routes.account_url %}
+        {% assign customer_fallback_text = 'layout.customer.account' | t %}
       {%- endif -%}
-        <a href="{{ routes.root_url }}" class="h2 header__logo{% if section.settings.logo == blank %} header__logo--text{% endif %}" data-header-logo>
-          {%- if section.settings.logo != blank -%}
-            {%- style -%}
-              .header__logo-image {
-                max-width: {{ section.settings.logo_max_width }}px;
-              }
-            {%- endstyle -%}
-
-            {% capture image_size %}{{ section.settings.logo_max_width }}x{% endcapture %}
-            <img srcset="{{ section.settings.logo | img_url: image_size }} 1x, {{ section.settings.logo | img_url: image_size, scale: 2 }} 2x"
-              src="{{ section.settings.logo | img_url: image_size }}"
-              loading="lazy"
-              class="header__logo-image"
-              alt="{{ section.settings.logo.alt | default: shop.name }}"
-              data-logo-image>
-          {% else %}
-            {{ shop.name }}
-          {% endif %}
-        </a>
-      {%- if request.page_type == 'index' %}
-        </h1>
-      {%- else -%}
-      </div>
+      <a href="{{ customer_url }}" class="header__icon header__icon--accounts-link focus-inset" data-header-icon>
+        {% render 'icon-account' %}
+        <span class="visually-hidden">{{ customer_fallback_text }}</span>
+      </a>
     {%- endif -%}
 
+    <!-- LOCALE -->
+    <div class="localization-switcher">
+    {%- form 'localization', class: 'locale_dropup', id: 'localizationForm' -%}
+        <button 
+          type="button" 
+          class="locale_button" 
+          aria-expanded="false"             
+          aria-controls="localeList" 
+          
+        > {{ form.current_locale.endonym_name }}
 
-        {%- if section.settings.show_search -%}
-          <button type="button"
-            class="header__icon header__icon--button header__icon--search-button focus-inset"
-            aria-controls="SearchDrawer"
-            aria-haspopup="dialog"
-            aria-expanded="false"
-            data-popup-open="search"
-            data-search-toggle
-            data-header-icon
-          >
-            {% render 'icon-search' %}
-            <span class="visually-hidden">{{ 'general.search.search' | t }}</span>
+        </button>
+        <ul id="localeList" class="locale_content">
+
+        {%- for locale in form.available_locales -%}
+          <li class="list__item {% if locale.iso_code == form.current_locale.iso_code %} current {% endif %}">
+
+              <a
+                id="localeLink-{% increment %}" 
+
+                {% if page.url == "{{ shop.url }}" %} href="/" 
+
+                {% elsif page.url == "{{ shop.url }}/es" %} href="{{ shop.url }}/es" {% endif %} 
+
+                lang="{{ locale.iso_code }}"
+
+                {% if locale.iso_code == form.current_locale.iso_code %} 
+                aria-current="true" 
+                {% endif %}
+                > {{ locale.endonym_name }}
+              </a>
+            </li>
+          {%- endfor -%} 
+
+
+        </ul>
+        <input 
+          type="hidden" 
+          name="locale_code" 
+          id="LocaleSelector" 
+          value="{{ form.current_locale.iso_code }}"
+        />
+    {%- endform -%}
+    <script>
+      document.querySelectorAll("[id*=localeLink-]").forEach(item => {
+        item.addEventListener("click", event => {
+          document.getElementById("LocaleSelector").value = item.getAttribute("lang");
+          document.getElementById("localizationForm").submit();
+        })
+      })
+    </script>
+    </div>
+
+</div>
+<!-- /END TOPBAR -->
+
+<div 
+  class="header-wrapper" 
+  data-section-id="{{ section.id }}" 
+  data-section-type="header"
+>
+
+
+{%- if section.settings.announcement_bar_enabled -%}
+{%- assign announcement_bar_color_text_rgba_stripped = section.settings.announcement_bar_color_text | color_to_rgb | remove: 'rgb(' | remove: ')' -%}
+{%- style -%}
+  .announcement-bar {
+    background-color: {{ section.settings.announcement_bar_color_background }};
+    border-bottom: 1px solid {{ section.settings.announcement_bar_color_text }};
+  }
+
+  .announcement-bar__link,
+  .announcement-bar__message {
+    color: {{ section.settings.announcement_bar_color_text }};
+  }
+
+  .announcement-bar {
+    --focus-color: rgba({{ announcement_bar_color_text_rgba_stripped }}, 0.8);
+    --focus-offset-color: {{ section.settings.announcement_bar_color_background }};
+  }
+
+  {%- if section.settings.enable_secondary_background -%}
+    .search-drawer {
+      background-color: var(--color-secondary-background);
+    }
+
+    .search__form-button--drawer, .search__form-input-label--drawer, .search__form-input--drawer.form__input {
+      color: var(--color-secondary-background-text);
+    }
+
+    .search__form-input--drawer.form__input{
+      border-color: var(--color-secondary-background-text);
+    }
+
+    .search__form-button--drawer .icon-close {
+      stroke: var(--color-secondary-background-text);
+    }
+
+    .search-drawer {
+      --focus-color: rgba(var(--color-secondary-background-text-rgba-stripped), 0.8);
+      --focus-offset-color: var(--color-secondary-background);
+    }
+  {%- endif -%}
+{%- endstyle -%}
+
+<div 
+  class="announcement-bar" 
+  role="region" 
+  aria-label="{{ 'sections.header.announcement' | t }}" 
+  data-announcement-bar
+>
+  {%- if section.settings.announcement_bar_text != blank -%}
+    {%- if section.settings.announcement_bar_url != blank -%}
+      <a href="{{ section.settings.announcement_bar_url }}" class="announcement-bar__link focus-inset">
+    {%- endif -%}
+
+    <p class="announcement-bar__message">
+      {{ section.settings.announcement_bar_text | escape }}
+    </p>
+
+    {%- if section.settings.announcement_bar_url != blank -%}
+        {% render 'icon-arrow-right-large' %}
+      </a>
+    {%- endif -%}
+  {%- endif -%}
+</div>
+{%- endif -%}
+
+{%- liquid
+assign render_menu = false
+
+if section.settings.main_menu != blank
+  assign menu = linklists[section.settings.main_menu]
+
+  if menu.links.size != 0
+    assign render_menu = true
+  endif
+endif
+-%}
+
+<!-- #HEADER -->
+  <header 
+    class="header
+    {% if section.settings.enable_secondary_background %} 
+      header--secondary-background
+    {% endif %}" 
+    role="banner" 
+    data-header
+  >
+    <!-- #HEADER CONTENT -->
+    <div class="header__content-wrapper">
+    
+      {%- liquid
+        if render_menu
+          render 'menu-navigation', menu: menu, is_mobile: true
+        endif
+      -%}
+   
+      <!--  #HEADER CONTENT ITEMS-->
+      <div class="header__icons">
+
+        <!-- MENU -->
+        <ul>
+          <li>
+            <button type="button" class="customers-button">
+              <span class="sr-only">customers</span>
+              <span class="hiraku-open-btn-line"></span>
           </button>
+          <li>
+            <li>
+              <button type="button" class="menu-button">
+                <span class="sr-only">1</span>
+                <span class="hiraku-open-btn-line"></span>
+            </button>
+            <li>
+              <li>
+                <button type="button" class="menu-button">
+                  <span class="sr-only">2</span>
+                  <span class="hiraku-open-btn-line"></span>
+              </button>
+              <li>
+                <li>
+                  <button type="button" class="menu-button">
+                    <span class="sr-only">3</span>
+                    <span class="hiraku-open-btn-line"></span>
+                </button>
+                <li>
+            <button type="button" class="menu-button">
+              <span class="sr-only">MENU</span>
+              <span class="hiraku-open-btn-line"></span>
+          </button>
+          </li>
+          <li>
+            <a href="/">item 3</a>
+          </li>
+        </ul>
 
-          <a href="{{ routes.search_url }}" class="header__icon header__icon--search-link focus-inset" data-header-icon>
-            {% render 'icon-search' %}
-            <span class="visually-hidden">{{ 'general.search.search' | t }}</span>
-          </a>
+        <!-- LOGO -->
+        {%- if request.page_type == 'index' -%}
+        <h1 class="header__heading">
+        {%- else -%}
+        <div class="header__heading">
         {%- endif -%}
+          <a href="{{ routes.root_url }}" class="h2 header__logo{% if section.settings.logo == blank %} header__logo--text{% endif %}" data-header-logo>
+            {%- if section.settings.logo != blank -%}
+              {%- style -%}
+                .header__logo-image {
+                  max-width: {{ section.settings.logo_max_width }}px;
+                }
+              {%- endstyle -%}
+              {% capture image_size %}{{ section.settings.logo_max_width }}x{% endcapture %}
+              <img 
+                srcset="{{ section.settings.logo | img_url: image_size }} 1x, {{ section.settings.logo | img_url: image_size, scale: 2 }} 2x"
+                src="{{ section.settings.logo | img_url: image_size }}"
+                loading="lazy"
+                class="header__logo-image"
+                alt="{{ section.settings.logo.alt | default: shop.name }}"
+                data-logo-image
+              >
+            {% else %}
+              {{ shop.name }}
+            {% endif %}
+          </a>
+        {%- if request.page_type == 'index' %}
+        </h1>
+        {%- else -%}
+      </div>
+      {%- endif -%}
 
-        {%- if shop.customer_accounts_enabled -%}
-          {% assign customer_url = routes.account_login_url %}
-          {% assign customer_fallback_text = 'layout.customer.log_in' | t %}
-
-          {%- if customer -%}
-            {% assign customer_url = routes.account_url %}
-            {% assign customer_fallback_text = 'layout.customer.account' | t %}
+          <!-- SEARCH BUTTON -->
+          {%- if section.settings.show_search -%}
+            <button type="button"
+              class="header__icon header__icon--button header__icon--search-button focus-inset"
+              aria-controls="SearchDrawer"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              data-popup-open="search"
+              data-search-toggle
+              data-header-icon
+            >
+              {% render 'icon-search' %}
+              <span class="visually-hidden">{{ 'general.search.search' | t }}</span>
+            </button>
+            <a href="{{ routes.search_url }}" class="header__icon header__icon--search-link focus-inset" data-header-icon>
+              {% render 'icon-search' %}
+              <span class="visually-hidden">{{ 'general.search.search' | t }}</span>
+            </a>
           {%- endif -%}
 
-          <a href="{{ customer_url }}" class="header__icon header__icon--accounts-link focus-inset" data-header-icon>
-            {% render 'icon-account' %}
-            <span class="visually-hidden">{{ customer_fallback_text }}</span>
-          </a>
-        {%- endif -%}
+      
 
-        <a href="{{ routes.cart_url }}"
-          class="header__icon header__icon--button header__icon--cart-button-link{% unless settings.show_cart_drawer %} header__icon--cart-visible{% endunless %} focus-inset"
-          data-header-icon
-        >
-          {% render 'icon-cart' %}
-          <span class="visually-hidden">{{ 'layout.cart.title' | t }}</span>
-
-          <div class="header__cart-count-bubble{% if cart.item_count == 0 %} hidden{% endif %}" data-cart-count-bubble>
-              <span class="visually-hidden" data-cart-count-text>{{ 'layout.cart.items_count' | t }}</span>
-              <span data-cart-count>
-                {%- if cart.item_count > 99 -%}
-                  99+
-                {%- else -%}
-                  {{ cart.item_count }}
-                {%- endif -%}
-              </span>
-            </div>
-        </a>
-
-        {%- if settings.show_cart_drawer -%}
-          <button class="header__icon header__icon--button header__icon--cart focus-inset"
-           
-            aria-controls="CartDrawer"
-            aria-haspopup="dialog"
-            aria-expanded="false"
-            data-popup-open="cart">
-            <div class="header__cart-indicator">
-              {% render 'icon-cart' %}
-              <span class="visually-hidden">{{ 'layout.cart.title' | t }}</span>
-
-              <div class="header__cart-count-bubble{% if cart.item_count == 0 %} hidden{% endif %}" data-cart-count-bubble>
+          <!-- CART BUTTON -->
+          <a href="{{ routes.cart_url }}"
+            class="header__icon header__icon--button header__icon--cart-button-link{% unless settings.show_cart_drawer %} header__icon--cart-visible{% endunless %} focus-inset"
+            data-header-icon
+          >
+            {% render 'icon-cart' %}
+            <span class="visually-hidden">{{ 'layout.cart.title' | t }}</span>
+            <div class="header__cart-count-bubble{% if cart.item_count == 0 %} hidden{% endif %}" data-cart-count-bubble>
                 <span class="visually-hidden" data-cart-count-text>{{ 'layout.cart.items_count' | t }}</span>
                 <span data-cart-count>
                   {%- if cart.item_count > 99 -%}
@@ -160,62 +324,84 @@
                   {%- endif -%}
                 </span>
               </div>
-            </div>
+          </a>
+          {%- if settings.show_cart_drawer -%}
+            <button class="header__icon header__icon--button header__icon--cart focus-inset"
+            
+              aria-controls="CartDrawer"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              data-popup-open="cart">
+              <div class="header__cart-indicator">
+                {% render 'icon-cart' %}
+                <span class="visually-hidden">{{ 'layout.cart.title' | t }}</span>
 
-            <div class="header__cart-price-bubble" data-header-icon>
-              <span class="visually-hidden">{{ 'layout.cart.cart_price' | t }}</span>
-              <span data-cart-price-bubble data-cart-price>{{ cart.total_price | money }}</span>
-            </div>
-          </button>
-        {%- endif -%}
+                <div class="header__cart-count-bubble{% if cart.item_count == 0 %} hidden{% endif %}" data-cart-count-bubble>
+                  <span class="visually-hidden" data-cart-count-text>{{ 'layout.cart.items_count' | t }}</span>
+                  <span data-cart-count>
+                    {%- if cart.item_count > 99 -%}
+                      99+
+                    {%- else -%}
+                      {{ cart.item_count }}
+                    {%- endif -%}
+                  </span>
+                </div>
+              </div>
 
-        
-
-        {%- if render_menu -%}
-          <button class="header__icon header__icon--button header__icon--menu-navigation focus-inset"
-            aria-controls="MenuNavigationDrawer"
-            aria-haspopup="dialog"
-            aria-expanded="false"
-            aria-label="{{ 'sections.header.menu' | t }}"
-            data-mobile-navigation-toggle
-          >
-            <span class="menu-icon">
-              <span class="menu-icon__bar"></span>
-            </span>
-          </button>
-        {%- endif -%}
-    </div>
-      {%- if render_menu -%}
-        <div class="stage header__mobile-navigation" data-popup-stage="menu-navigation" data-mobile-navigation-container>
-          <div class="stage__overlay" data-popup-close="menu-navigation"></div>
-          <div
-            class="drawer drawer--right"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="menu-drawer-title"
-            tabindex="-1"
-            data-popup="menu-navigation"
-            data-mobile-navigation-drawer
-          >
-            <button class="header__icon header__icon--button header__icon--mobile-navigation-close visually-hidden focus-inset"
-              aria-label="{{ 'sections.header.close' | t }}"
-              data-popup-close="menu-navigation"
-            >
-              <span class="menu-icon">
-                <span class="menu-icon__bar"></span>
-              </span>
+              <div class="header__cart-price-bubble" data-header-icon>
+                <span class="visually-hidden">{{ 'layout.cart.cart_price' | t }}</span>
+                <span data-cart-price-bubble data-cart-price>{{ cart.total_price | money }}</span>
+              </div>
             </button>
-            <h2 class="visually-hidden" id="menu-drawer-title">{{ 'sections.header.menu' | t }}</h2>
-            {% render 'menu-navigation', menu: menu, is_mobile: true %}
+          {%- endif -%}
+
+          <!-- HAMBURGER BUTTON -->
+          {%- if render_menu -%}
+          <div class="stage header__mobile-navigation" data-popup-stage="menu-navigation" data-mobile-navigation-container>
+            <div class="stage__overlay" data-popup-close="menu-navigation"></div>
+            <div
+              class="drawer drawer--right"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="menu-drawer-title"
+              tabindex="-1"
+              data-popup="menu-navigation"
+              data-mobile-navigation-drawer
+            >
+              <button class="header__icon header__icon--button header__icon--mobile-navigation-close visually-hidden focus-inset"
+                aria-label="{{ 'sections.header.close' | t }}"
+                data-popup-close="menu-navigation"
+              >
+                <span class="menu-icon">
+                  <span class="menu-icon__bar"></span>
+                </span>
+              </button>
+              <h2 class="visually-hidden" id="menu-drawer-title">{{ 'sections.header.menu' | t }}</h2>
+              {% render 'menu-navigation', menu: menu, is_mobile: true %}
+            </div>
           </div>
-        </div>
-      {%- endif -%}
- 
-    </div>
+        {%- endif -%}
 
+
+
+      </div>
+
+  <!-- /END HEADER CONTENT -->
   </header>
-
+<!-- /END HEADER -->
 </div>
+
+<div id="menu-sidebar">
+  <div class="main-menu">
+      MENU
+  </div>
+</div>
+<div id="customers-sidebar">
+  <div class="customers">
+      FORM
+  </div>
+</div>
+
 
 <script type="application/ld+json">
 {
@@ -240,6 +426,9 @@
 }
 </script>
 
+
+
+
 {% if request.page_type == 'index' %}
   {% assign potential_action_target = shop.url | append: routes.search_url | append: "?q={search_term_string}" %}
   <script type="application/ld+json">
@@ -255,9 +444,13 @@
       "url": {{ shop.url | append: page.url | json }}
     }
   </script>
+
+
+
+
+
+
 {% endif %}
-
-
 
 {% schema %}
 {
@@ -425,7 +618,7 @@
         "zh-CN": "显示搜索",
         "zh-TW": "顯示搜尋"
       },
-      "default": false
+      "default": true
     },
     {
       "type": "header",

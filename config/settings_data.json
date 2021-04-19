@@ -125,9 +125,9 @@
           "footer-2"
         ],
         "settings": {
-          "color_footer_background": "#EBF2EF",
-          "color_footer_heading_text": "#2D4F1E",
-          "color_footer_body_text": "#577B46"
+          "color_footer_background": "#0093B3",
+          "color_footer_heading_text": "#FFF",
+          "color_footer_body_text": "#FFF"
         }
       }
     },
@@ -140,13 +140,13 @@
       "featured-product"
     ],
     "color_background": "#FFFFFF",
-    "color_secondary_background": "#EBF2EF",
-    "color_borders_and_lines": "#577B46",
-    "color_button": "#2D4F1E",
-    "color_headings_and_links": "#2D4F1E",
-    "color_body_text": "#537344",
-    "color_secondary_background_text": "#2D4F1E",
-    "color_sale_price": "#E84C37",
+    "color_secondary_background": "#FAFAFA",
+    "color_borders_and_lines": "#0093B3",
+    "color_button": "#262626",
+    "color_headings_and_links": "#0093B3",
+    "color_body_text": "#262626",
+    "color_secondary_background_text": "#262626",
+    "color_sale_price": "#E22120",
     "color_field_text": "#2D4F1E",
     "color_field_borders": "#2D4F1E",
     "font_heading": "futura_n5",
@@ -398,9 +398,9 @@
             "footer-2"
           ],
           "settings": {
-            "color_footer_background": "#EBF2EF",
-            "color_footer_heading_text": "#2D4F1E",
-            "color_footer_body_text": "#577B46"
+            "color_footer_background": "#0093B3",
+            "color_footer_heading_text": "#FFF",
+            "color_footer_body_text": "#FFF"
           }
         }
       },

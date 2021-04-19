@@ -68,6 +68,62 @@
 
 {%- assign color_footer_body_text_rgba_stripped = section.settings.color_footer_body_text | color_to_rgb | remove: 'rgb(' | remove: ')' -%}
 
+
+<div class="newsletter">
+{%- unless section.blocks.size == 0 -%}
+  {%- for block in section.blocks -%}
+    {%- if block.settings.title != blank -%}
+        <p class="h2 footer__title{% if block.type == 'newsletter' %} footer__title--newsletter{% endif %}">{{ block.settings.title | escape }}</p>
+    {%- endif -%}
+      {%- case block.type -%}
+      {%- when 'newsletter' -%}
+      {%- assign formId = 'ContactFooter' -%}
+      {%- form 'customer', id: formId, class: 'footer__newsletter-form form', data-form: '', novalidate: 'novalidate' -%}
+        {%- if form.posted_successfully? -%}
+          <p class="form-status-message form-status-message--success" tabindex="-1" data-form-status>
+            {{ 'general.newsletter_form.confirmation' | t }}
+          </p>
+        {%- endif -%}
+        <input type="hidden" name="contact[tags]" value="newsletter">
+        <div class="footer__newsletter-form-content">
+          {%- if form.errors contains 'email' -%}
+            <span id="{{ formId }}-email-error" class="form__error-message-wrapper form__error-message-wrapper--input">
+              <span class="visually-hidden">{{ 'general.accessibility.error' | t }}</span>
+              {% render 'icon-error' %}
+              <span class="form__error-message">{{ form.errors.translated_fields['email'] | capitalize }} {{ form.errors.messages['email'] }}.</span>
+            </span>
+          {%- endif -%}
+
+          <div class="footer__newsletter-input-wrapper form__input-wrapper{% if form.email or form.errors %} form__input-wrapper--floating-label{% endif %}{% if form.errors %} form__input-wrapper--error{% endif %}" data-form-input-wrapper>
+            <label class="footer__newsletter-label form__input-label" for="NewsletterForm--{{ section.id }}">
+              {{ 'general.newsletter_form.email_placeholder' | t }}
+            </label>
+            <input
+              id="NewsletterForm--{{ section.id }}"
+              type="email"
+              name="contact[email]"
+              class="footer__newsletter-input form__input"
+              value="{{ form.email }}"
+              aria-required="true"
+              required
+              autocorrect="off"
+              autocapitalize="off"
+              {% if form.errors %}
+                aria-invalid="true"
+                aria-describedby="{{ formId }}-email-error"
+                data-form-status
+              {% endif %}>
+          </div>
+          <button type="submit" class="footer__newsletter-submit button" name="commit" id="Subscribe">
+            {{ 'general.newsletter_form.submit' | t }}
+          </button>
+        </div>
+      {%- endform -%}
+    {%- endcase -%}
+  {%- endfor -%}
+{%- endunless -%}
+</div>
+
 <footer class="footer{% if section.blocks.size > 0 %} footer--has-blocks{% endif %} critical-hidden" role="contentinfo" data-section-id="{{ section.id }}" data-section-type="footer">
   {%- style -%}
     .footer {
@@ -109,59 +165,13 @@
     }
   {%- endstyle -%}
 
+
   <div class="footer__content-wrapper">
     {%- unless section.blocks.size == 0 -%}
       <div class="footer__content{% if footer_block_width %} {{ footer_block_width }}{% endif %}">
         {%- for block in section.blocks -%}
           <div>
-            {%- if block.settings.title != blank -%}
-              <p class="h2 footer__title{% if block.type == 'newsletter' %} footer__title--newsletter{% endif %}">{{ block.settings.title | escape }}</p>
-            {%- endif -%}
-
             {%- case block.type -%}
-              {%- when 'newsletter' -%}
-                {%- assign formId = 'ContactFooter' -%}
-                {%- form 'customer', id: formId, class: 'footer__newsletter-form form', data-form: '', novalidate: 'novalidate' -%}
-                  {%- if form.posted_successfully? -%}
-                    <p class="form-status-message form-status-message--success" tabindex="-1" data-form-status>
-                      {{ 'general.newsletter_form.confirmation' | t }}
-                    </p>
-                  {%- endif -%}
-                  <input type="hidden" name="contact[tags]" value="newsletter">
-                  <div class="footer__newsletter-form-content">
-                    {%- if form.errors contains 'email' -%}
-                      <span id="{{ formId }}-email-error" class="form__error-message-wrapper form__error-message-wrapper--input">
-                        <span class="visually-hidden">{{ 'general.accessibility.error' | t }}</span>
-                        {% render 'icon-error' %}
-                        <span class="form__error-message">{{ form.errors.translated_fields['email'] | capitalize }} {{ form.errors.messages['email'] }}.</span>
-                      </span>
-                    {%- endif -%}
-
-                    <div class="footer__newsletter-input-wrapper form__input-wrapper{% if form.email or form.errors %} form__input-wrapper--floating-label{% endif %}{% if form.errors %} form__input-wrapper--error{% endif %}" data-form-input-wrapper>
-                      <label class="footer__newsletter-label form__input-label" for="NewsletterForm--{{ section.id }}">
-                        {{ 'general.newsletter_form.email_placeholder' | t }}
-                      </label>
-                      <input
-                        id="NewsletterForm--{{ section.id }}"
-                        type="email"
-                        name="contact[email]"
-                        class="footer__newsletter-input form__input"
-                        value="{{ form.email }}"
-                        aria-required="true"
-                        required
-                        autocorrect="off"
-                        autocapitalize="off"
-                        {% if form.errors %}
-                          aria-invalid="true"
-                          aria-describedby="{{ formId }}-email-error"
-                          data-form-status
-                        {% endif %}>
-                    </div>
-                    <button type="submit" class="footer__newsletter-submit button" name="commit" id="Subscribe">
-                      {{ 'general.newsletter_form.submit' | t }}
-                    </button>
-                  </div>
-                {%- endform -%}
               {%- when 'text' -%}
                 <div class="rte">
                   {{ block.settings.text }}
@@ -185,55 +195,12 @@
       </div>
     {%- endunless -%}
 
-    {%- if social_icons or locale_selector -%}
+
+    {%- if social_icons -%}
       <div class="footer__bottom-content{%- unless show_payment_icons or social_icons %} footer__bottom-content--align-left{% endunless %}">
         {%- if social_icons -%}
           {{ social_icons_markup }}
         {%- endif -%}
-
-        {%- if locale_selector -%}
-          {%- form 'localization', class: 'footer__disclosure-form', data-disclosure-form: '' -%}
-            <div class="selectors-form__item">
-              <h2 class="visually-hidden" id="lang-heading">
-                {{ 'layout.footer.language_label' | t }}
-              </h2>
-
-              <div class="disclosure" data-disclosure>
-                <button
-                  type="button"
-                  class="disclosure__toggle"
-                  aria-expanded="false" aria-controls="lang-list" aria-describedby="lang-heading"
-                  data-disclosure-toggle
-                >
-                  {{ form.current_locale.endonym_name }}
-                  <span class="disclosure__toggle-down">
-                    {% render 'icon-select' %}
-                  </span>
-                  <span class="disclosure__toggle-up">
-                    {% render 'icon-select' %}
-                  </span>
-                </button>
-                <ul id="lang-list" class="disclosure-list" data-disclosure-list role="list">
-                  {%- for locale in form.available_locales -%}
-                    <li class="disclosure-list__item {% if locale.iso_code == form.current_locale.iso_code %}disclosure-list__item--current{% endif %}">
-                      <a class="disclosure-list__option"
-                          href="#"
-                          lang="{{ locale.iso_code }}"
-                          {% if locale.iso_code == form.current_locale.iso_code %} aria-current="true"{% endif %}
-                          data-value="{{ locale.iso_code }}"
-                          data-disclosure-option
-                      >
-                        {{ locale.endonym_name }}
-                      </a>
-                    </li>
-                  {%- endfor -%}
-                </ul>
-                <input type="hidden" name="locale_code" id="LocaleSelector" value="{{ form.current_locale.iso_code }}" data-disclosure-input/>
-              </div>
-            </div>
-          {%- endform -%}
-        {%- endif -%}
-
         {%- if social_icons -%}
           {{ social_icons_markup }}
         {%- endif -%}
